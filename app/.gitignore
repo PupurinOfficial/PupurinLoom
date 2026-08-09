@@ -1,0 +1,17 @@
+node_modules/
+out/
+.tools/
+.userdata/
+.vscode/
+release/
+python/dist/
+python/build/
+python/.venv/
+__pycache__/
+*.pyc
+*.tsbuildinfo
+.DS_Store
+*.log
+启动开发服务器.app
+启动开发服务器.command
+启动开发服务器.scpt

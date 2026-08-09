@@ -1,0 +1,65 @@
+# 铃言织机° (Pupurin° Loom) — 打包配置
+appId: com.pupurin.loom
+productName: 铃言织机°
+copyright: Copyright © 2026 仆仆铃°工作室
+
+directories:
+  buildResources: build
+  output: release
+
+# 使用本地已下载的 Electron 发行版，避免打包时从 GitHub 重新下载
+electronDist: node_modules/electron/dist
+
+files:
+  - out/**/*
+  - "!**/*.map"
+
+# 应用外资源（不进入 asar，运行时通过 process.resourcesPath 访问）
+extraResources:
+  # Python 后端源码（回退方案：无内置二进制时用系统 python3 运行）
+  - from: python
+    to: python
+    filter: ["*.py", "sample_game/**", "requirements.txt", "!dist/**", "!build/**", "!.venv/**", "!__pycache__/**"]
+  # Ren'Py 项目模板
+  - from: a new Pupurin Loom game
+    to: a new Pupurin Loom game
+
+# macOS 平台专用
+mac:
+  target:
+    - target: dmg
+    - target: zip
+  category: public.app-category.developer-tools
+  icon: build/icon.icns
+  # 无 Apple Developer 证书时跳过签名（保持 ad-hoc 可用）
+  identity: null
+  extraResources:
+    # Python 后端可执行文件（PyInstaller 单文件，arm64）
+    - from: python/dist/pupurin-backend
+      to: bin/pupurin-backend
+
+# Windows 平台
+win:
+  target:
+    - target: nsis
+  icon: build/icon.ico
+  extraResources:
+    # Python 后端可执行文件（PyInstaller 单文件，Windows）
+    - from: python/dist/pupurin-backend.exe
+      to: bin/pupurin-backend.exe
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+  artifactName: "${productName}-${version}-setup.${ext}"
+
+dmg:
+  artifactName: "${productName}-${version}.${ext}"
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications

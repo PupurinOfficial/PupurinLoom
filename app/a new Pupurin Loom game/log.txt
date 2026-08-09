@@ -1,0 +1,27 @@
+2026-08-06 03:38:28 UTC
+macOS-26.5-arm64-arm-64bit
+Ren'Py 8.5.2.26010301
+
+Early init took 26 ms
+Loading error handling took 76 ms
+Loading script took 459 ms
+Loading save slot metadata took 13 ms
+Loading persistent took 0 ms
+Running init code took 54 ms
+Loading analysis data took 0 ms
+Analyze and compile ATL took 3 ms
+Reloading save slot metadata took 0 ms
+Backing up script files to '/Users/few302/Library/RenPy/backups/a new Pupurin Loom game':
+Dump and make backups took 23 ms
+Cleaning cache took 0 ms
+Making clean stores took 0 ms
+Initial gc took 18 ms
+DPI scale factor: 1.000000
+Creating interface object took 0 ms
+Init translation took 0 ms
+Cleaning stores took 0 ms
+Load screen analysis took 0 ms
+Analyze screens took 10 ms
+Save screen analysis took 6 ms
+Save pyanalysis took 2 ms
+Save bytecode took 0 ms

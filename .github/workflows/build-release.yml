@@ -1,0 +1,101 @@
+name: Build & Release
+
+# 打 v* tag 时自动构建 macOS / Windows 安装包并上传到对应 GitHub Release
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-mac:
+    name: Build macOS (dmg + zip)
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python deps
+        run: |
+          pip install fastapi==0.115.0 "uvicorn[standard]==0.30.6" pyinstaller
+
+      - name: Build python backend (PyInstaller)
+        working-directory: app/python
+        run: |
+          python3 -m PyInstaller -F --name pupurin-backend \
+            --collect-all uvicorn --collect-all fastapi --collect-all starlette \
+            --hidden-import uvloop \
+            --add-data "$PWD/sample_game:sample_game" \
+            --distpath dist --workpath build/pyinstaller --specpath build --noconfirm server.py
+
+      - name: Install Node deps
+        run: npm ci
+
+      - name: Build & package
+        run: npm run dist:mac
+
+      - name: Upload assets to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            app/release/*.dmg
+            app/release/*.zip
+            app/release/*.blockmap
+
+  build-win:
+    name: Build Windows (NSIS)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python deps
+        run: |
+          pip install fastapi==0.115.0 uvicorn==0.30.6 pyinstaller
+
+      - name: Build python backend (PyInstaller)
+        working-directory: app/python
+        run: |
+          python -m PyInstaller -F --name pupurin-backend `
+            --collect-all uvicorn --collect-all fastapi --collect-all starlette `
+            --add-data "sample_game;sample_game" `
+            --distpath dist --workpath build\pyinstaller --specpath build --noconfirm server.py
+
+      - name: Install Node deps
+        run: npm ci
+
+      - name: Build & package
+        run: npm run dist:win
+
+      - name: Upload assets to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            app/release/*.exe
+            app/release/*.blockmap

@@ -1,0 +1,114 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ---- 主题变量（space-separated RGB，供 tailwind rgb(var(--x) / <alpha>) 使用） ----
+   默认深色 = 铃金（现有配色）；[data-theme='light'] 为浅色模式。
+   --loom-accent / --loom-accent-dim 可被预设配色与自定义配色覆盖（JS 写入）。 */
+:root {
+  --loom-bg: 31 29 26;
+  --loom-panel: 42 39 34;
+  --loom-panel2: 51 48 42;
+  --loom-border: 68 64 58;
+  --loom-accent: 255 228 166;
+  --loom-accent-dim: 138 122 74;
+  --loom-text: 240 234 214;
+  --loom-muted: 154 148 138;
+  --loom-ok: 154 214 160;
+  --loom-err: 224 144 144;
+  color-scheme: dark;
+}
+
+[data-theme='light'] {
+  --loom-bg: 247 245 240;
+  --loom-panel: 255 255 255;
+  --loom-panel2: 239 236 228;
+  --loom-border: 216 211 200;
+  --loom-accent: 176 125 46;
+  --loom-accent-dim: 160 138 90;
+  --loom-text: 43 41 38;
+  --loom-muted: 125 118 107;
+  --loom-ok: 63 143 82;
+  --loom-err: 192 57 43;
+  color-scheme: light;
+}
+
+/* 编辑器字号（代码编辑器 / 流程图），默认 13px，可在设置中调整 */
+:root {
+  --loom-editor-font: 13px;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  overflow: hidden;
+}
+
+/* React Flow 主题适配 */
+.react-flow__node {
+  font-size: 12px;
+}
+.react-flow__edge-path {
+  stroke: rgb(var(--loom-border));
+}
+.react-flow__edge.selected .react-flow__edge-path,
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke: rgb(var(--loom-accent));
+}
+.react-flow__controls {
+  background: rgb(var(--loom-panel));
+  border: 1px solid rgb(var(--loom-border));
+}
+.react-flow__controls-button {
+  background: rgb(var(--loom-panel));
+  color: rgb(var(--loom-text));
+  border-bottom: 1px solid rgb(var(--loom-border));
+}
+.react-flow__controls-button:hover {
+  background: rgb(var(--loom-panel2));
+}
+.react-flow__minimap {
+  background: rgb(var(--loom-panel));
+}
+
+/* 滚动条 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgb(var(--loom-border));
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, rgb(var(--loom-border)), rgb(var(--loom-accent)) 15%);
+}
+
+/* 全局搜索命中高亮（Monaco inlineClassName，短时背景色） */
+.loom-search-match {
+  background: color-mix(in srgb, rgb(var(--loom-accent)) 45%, transparent) !important;
+  border-radius: 2px;
+}
+
+/* 原生颜色选择器取色按钮的基础样式 */
+input[type='color'] {
+  -webkit-appearance: none;
+  appearance: none;
+  border: none;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+}
+input[type='color']::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+input[type='color']::-webkit-color-swatch {
+  border: 1px solid rgb(var(--loom-border));
+  border-radius: 6px;
+}

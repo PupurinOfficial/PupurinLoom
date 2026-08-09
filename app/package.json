@@ -1,0 +1,41 @@
+{
+  "name": "pupurin-loom",
+  "version": "0.3.0",
+  "description": "铃言织机° (Pupurin° Loom) — 可视化 Ren'Py 开发工具 · A Pupurin° Project · 仆仆铃°工作室",
+  "main": "out/main/index.js",
+  "author": "仆仆铃°工作室 <https://space.bilibili.com/3546379813129005>",
+  "license": "MIT",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "dist": "electron-vite build && electron-builder",
+    "dist:mac": "electron-vite build && electron-builder --mac",
+    "dist:win": "electron-vite build && electron-builder --win",
+    "py:install": "python3 -m pip install --break-system-packages -r python/requirements.txt",
+    "py:run": "python3 python/server.py",
+    "py:build": "cd python && python3 -m PyInstaller -F --name pupurin-backend --collect-all uvicorn --collect-all fastapi --collect-all starlette --hidden-import uvloop --add-data \"$PWD/sample_game:sample_game\" --distpath dist --workpath build/pyinstaller --specpath build --noconfirm server.py"
+  },
+  "dependencies": {
+    "@monaco-editor/react": "^4.6.0",
+    "@xyflow/react": "^12.3.5",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zustand": "^4.5.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "autoprefixer": "^10.4.20",
+    "electron": "^31.3.0",
+    "electron-builder": "^24.13.3",
+    "electron-vite": "^2.3.0",
+    "png2icons": "^2.0.1",
+    "postcss": "^8.4.41",
+    "tailwindcss": "^3.4.10",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.0"
+  }
+}
