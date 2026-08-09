@@ -3,6 +3,8 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [main]
+    # 发版（打 v* tag）时自动重新构建站点，让「最新版本」徽标跟随 Releases 更新
+    tags: ['v*']
   workflow_dispatch:
 
 permissions:
@@ -24,7 +26,17 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - run: npm run build
+      - name: 获取最新版本号（从 GitHub Releases）
+        id: version
+        run: |
+          TAG=$(curl -fsSL -H "Authorization: Bearer ${{ github.token }}" \
+            "https://api.github.com/repos/PupurinOfficial/PupurinLoom/releases/latest" \
+            | jq -r '.tag_name // empty' 2>/dev/null) || true
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+      - name: 构建站点
+        run: npm run build
+        env:
+          PUBLIC_APP_VERSION: ${{ steps.version.outputs.version }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
