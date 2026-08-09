@@ -51,6 +51,7 @@ jobs:
       - name: Upload assets to Release
         uses: softprops/action-gh-release@v2
         with:
+          overwrite: true
           files: |
             app/release/*.dmg
             app/release/*.zip
@@ -84,7 +85,7 @@ jobs:
         run: |
           python -m PyInstaller -F --name pupurin-backend `
             --collect-all uvicorn --collect-all fastapi --collect-all starlette `
-            --add-data "sample_game;sample_game" `
+            --add-data "$PWD\sample_game;sample_game" `
             --distpath dist --workpath build\pyinstaller --specpath build --noconfirm server.py
 
       - name: Install Node deps
@@ -96,6 +97,7 @@ jobs:
       - name: Upload assets to Release
         uses: softprops/action-gh-release@v2
         with:
+          overwrite: true
           files: |
             app/release/*.exe
             app/release/*.blockmap
