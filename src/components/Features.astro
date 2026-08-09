@@ -1,0 +1,22 @@
+---
+import { features, site } from '../config'
+import Icon from './Icon.astro'
+---
+<section class="section" id="features">
+  <h2 class="section-title">特性</h2>
+  <p class="section-sub">围绕 Ren'Py 剧本创作打造的完整工作台 —— 从剧情编排到打包发行。</p>
+  <div class="feature-grid">
+    {features.map((f) => (
+      <div class="feature-card">
+        <div class="ico"><Icon name={f.icon} size={22} /></div>
+        <h3>{f.title}</h3>
+        <p>{f.desc}</p>
+      </div>
+    ))}
+  </div>
+  {site.images.showcase && (
+    <div class="showcase">
+      <img src={site.images.showcase} alt={`${site.name} 功能展示`} />
+    </div>
+  )}
+</section>

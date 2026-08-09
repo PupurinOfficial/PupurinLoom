@@ -1,20 +1,38 @@
 ---
-// 可行性验证用最小首页
-const title = '铃言织机° Pupurin° Loom'
-const description = "可视化 Ren'Py 开发工具 · 仆仆铃°工作室"
+import { site } from '../config'
+import '../styles/global.css'
+import Nav from '../components/Nav.astro'
+import Hero from '../components/Hero.astro'
+import Features from '../components/Features.astro'
+import Download from '../components/Download.astro'
+import Plugins from '../components/Plugins.astro'
+import Guide from '../components/Guide.astro'
+import About from '../components/About.astro'
+import Footer from '../components/Footer.astro'
+
+const base = import.meta.env.BASE_URL
 ---
 <!doctype html>
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content={description} />
-    <title>{title}</title>
+    <meta name="description" content={site.description} />
+    <meta property="og:title" content={`${site.name} · ${site.nameEn}`} />
+    <meta property="og:description" content={`${site.slogan} —— ${site.description}`} />
+    <link rel="icon" href={`${base}pupurin-logo.png`} />
+    <title>{site.name} · {site.nameEn} — {site.slogan}</title>
   </head>
-  <body style="font-family: system-ui, 'PingFang SC', sans-serif; background:#1e1e1e; color:#e6e6e6; margin:0; padding:48px 24px; text-align:center">
-    <h1 style="margin:0 0 8px">🎐 {title}</h1>
-    <p style="margin:0 0 24px; color:#9aa0a6">{description}</p>
-    <p style="color:#7aa2f7">Astro + GitHub Pages 可行性验证页面（构建于 {new Date().toISOString().slice(0, 10)}）</p>
-    <p>✅ 若你能看到本页，说明 Astro 静态构建 + Pages 部署链路完全可用</p>
+  <body>
+    <Nav />
+    <main>
+      <Hero />
+      <Features />
+      <Download />
+      <Plugins />
+      <Guide />
+      <About />
+    </main>
+    <Footer />
   </body>
 </html>

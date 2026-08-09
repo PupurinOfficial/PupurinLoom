@@ -1,0 +1,35 @@
+---
+import { site } from '../config'
+import Icon from './Icon.astro'
+---
+<section class="download-wrap">
+  <div class="section" id="download">
+    <h2 class="section-title">下载</h2>
+    <p class="section-sub">跨平台可视化 Ren'Py 开发工具，支持 macOS 与 Windows。</p>
+    <div class="version-line">
+      <span class="badge">v{site.version}</span>
+      <span style="color: var(--muted); font-size: 14px">最新稳定版</span>
+    </div>
+    <div class="download-grid">
+      <a class="dl-card" href={site.urls.releases} target="_blank" rel="noopener">
+        <div class="ico"><Icon name="apple" size={26} /></div>
+        <h4>macOS</h4>
+        <p>.dmg 安装包</p>
+      </a>
+      <a class="dl-card" href={site.urls.releases} target="_blank" rel="noopener">
+        <div class="ico"><Icon name="windows" size={26} /></div>
+        <h4>Windows</h4>
+        <p>.exe 安装包</p>
+      </a>
+      <a class="dl-card" href={site.urls.releases} target="_blank" rel="noopener">
+        <div class="ico"><Icon name="download" size={26} /></div>
+        <h4>全部版本</h4>
+        <p>GitHub Releases</p>
+      </a>
+    </div>
+    <p class="dl-note">
+      安装后应用内置「检查更新」：自动对比官方 Releases，发现新版本会展示更新详情并引导下载安装。
+      所有发行包均在 GitHub Releases 提供，欢迎前往查看更新说明与历史版本。
+    </p>
+  </div>
+</section>

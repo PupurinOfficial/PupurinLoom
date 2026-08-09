@@ -1,0 +1,25 @@
+---
+import { site } from '../config'
+import Icon from './Icon.astro'
+---
+<section class="section about-wrap" id="about">
+  <h2 class="section-title">关于</h2>
+  <div class="about-box">
+    <h3>仆仆铃°工作室</h3>
+    <p>
+      {site.name}（{site.nameEn}）是仆仆铃°工作室出品的可视化 Ren'Py 开发工具，
+      以「{site.slogan}」为理念，希望让文字冒险游戏的创作像织布一样从容。
+    </p>
+    <p>
+      项目以 {site.license} 开源，代码与发行版均托管在 GitHub；插件生态经由独立仓库维护，欢迎任何人提交插件。
+    </p>
+    <div class="about-links">
+      <a class="btn btn-primary" href={site.urls.bilibili} target="_blank" rel="noopener">
+        <Icon name="bilibili" size={15} /> Bilibili
+      </a>
+      <a class="btn btn-ghost" href={site.urls.org} target="_blank" rel="noopener">
+        <Icon name="github" size={15} /> PupurinOfficial
+      </a>
+    </div>
+  </div>
+</section>

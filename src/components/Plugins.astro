@@ -1,0 +1,85 @@
+---
+import { site } from '../config'
+import Icon from './Icon.astro'
+// 本地副本：构建期初始渲染数据 + 弱网/离线兜底（定期与 Loom-PluginStore 仓库 plugins.json 同步）
+import storeData from '../data/plugins.json'
+
+const initialPlugins = storeData.plugins
+---
+<section class="section" id="plugins">
+  <h2 class="section-title">插件生态</h2>
+  <p class="section-sub">
+    应用内置插件系统：命令、面板、事件钩子与右侧功能栏，还能通过插件商城一键安装社区插件。
+    以下插件列表实时读取插件商城仓库数据。
+  </p>
+  <div class="plugin-grid" id="plugin-grid">
+    {initialPlugins.map((p) => (
+      <div class="plugin-card">
+        <div class="ico">{p.icon ?? '🧩'}</div>
+        <div>
+          <h4>
+            {p.name ?? p.id}
+            {p.version && <span class="plugin-ver">v{p.version}</span>}
+          </h4>
+          <p>{p.description ?? ''}</p>
+        </div>
+      </div>
+    ))}
+  </div>
+  <div class="store-links">
+    <a class="btn btn-primary" href={site.urls.storeRepo} target="_blank" rel="noopener">
+      <Icon name="external" size={15} /> 插件商城
+    </a>
+    <a class="btn btn-ghost" href={site.urls.contributing} target="_blank" rel="noopener">
+      提交插件（贡献指南）
+    </a>
+  </div>
+</section>
+
+<script>
+  // 运行时拉取 Loom-PluginStore 仓库的 plugins.json，实时反映仓库数据；
+  // 远程不可用时保留上方 SSR 初始渲染（本地副本兜底）
+  const grid = document.getElementById('plugin-grid')
+  if (grid) {
+    const RAW =
+      'https://raw.githubusercontent.com/PupurinOfficial/Loom-PluginStore/main/plugins.json'
+    fetch(`${RAW}?t=${Date.now()}`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        return r.json()
+      })
+      .then((data) => {
+        const list = Array.isArray(data.plugins) ? data.plugins : []
+        if (!list.length) return
+        grid.replaceChildren(...list.map(makeCard))
+      })
+      .catch(() => {
+        /* 远程不可用：保留初始渲染 */
+      })
+  }
+
+  function makeCard(p) {
+    const el = document.createElement('div')
+    el.className = 'plugin-card'
+
+    const ico = document.createElement('div')
+    ico.className = 'ico'
+    ico.textContent = p.icon || '🧩'
+
+    const body = document.createElement('div')
+    const name = document.createElement('h4')
+    name.textContent = p.name || p.id
+    if (p.version) {
+      const ver = document.createElement('span')
+      ver.className = 'plugin-ver'
+      ver.textContent = `v${p.version}`
+      name.appendChild(ver)
+    }
+    const desc = document.createElement('p')
+    desc.textContent = p.description || ''
+    body.append(name, desc)
+
+    el.append(ico, body)
+    return el
+  }
+</script>

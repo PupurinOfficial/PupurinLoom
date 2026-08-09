@@ -1,0 +1,44 @@
+{
+  "plugins": [
+    {
+      "id": "script-stats",
+      "name": "剧本统计器",
+      "version": "1.1.0",
+      "description": "统计当前剧本字数、对话/旁白占比与各角色台词数量",
+      "author": "Pupurin° Loom",
+      "icon": "📊",
+      "repo": "https://github.com/PupurinOfficial/Loom-PluginStore",
+      "subpath": "script-stats"
+    },
+    {
+      "id": "story-ai",
+      "name": "AI 台词灵感",
+      "version": "1.1.0",
+      "description": "输入场景描述，调用 OpenAI 兼容 API 生成角色台词草稿",
+      "author": "Pupurin° Loom",
+      "icon": "✨",
+      "repo": "https://github.com/PupurinOfficial/Loom-PluginStore",
+      "subpath": "story-ai"
+    },
+    {
+      "id": "tts-reader",
+      "name": "朗读助手",
+      "version": "1.1.0",
+      "description": "用系统 TTS 朗读台词文本（macOS/Windows/Linux 零依赖）",
+      "author": "Pupurin° Loom",
+      "icon": "🔊",
+      "repo": "https://github.com/PupurinOfficial/Loom-PluginStore",
+      "subpath": "tts-reader"
+    },
+    {
+      "id": "weiyan-weiyu",
+      "name": "未言未语",
+      "version": "1.0.7",
+      "description": "把整个界面文字变成「未言未语」——哒拾叭木有嘛、嗯嗯哒咩大家、Ciallo～打招呼，失败/删除/取消后追加 QAQ，安装/运行/保存后追加 OVO，随机冒出颜文字（awa/uwu 等语气词与 (≧▽≦) 等表情符号）",
+      "author": "Pupurin° Loom",
+      "icon": "💬",
+      "repo": "https://github.com/PupurinOfficial/Loom-PluginStore",
+      "subpath": "weiyan-weiyu"
+    }
+  ]
+}

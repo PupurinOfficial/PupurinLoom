@@ -1,0 +1,21 @@
+---
+import { site } from '../config'
+
+const base = import.meta.env.BASE_URL
+---
+<section class="hero" id="top">
+  <img class="hero-logo" src={`${base}pupurin-logo.png`} alt={site.name} />
+  <h1>{site.name}</h1>
+  <p class="en">{site.nameEn}</p>
+  <p class="slogan">「{site.slogan}」</p>
+  <p class="desc">{site.description}</p>
+  <div class="hero-cta">
+    <a class="btn btn-primary" href="#download">立即下载</a>
+    <a class="btn btn-ghost" href="#guide">快速上手</a>
+  </div>
+  {site.images.hero && (
+    <div class="hero-media">
+      <img src={site.images.hero} alt={`${site.name} 界面截图`} />
+    </div>
+  )}
+</section>
