@@ -4,7 +4,7 @@ export const site = {
   nameEn: 'Pupurin° Loom',
   slogan: '以言为线，铃织成篇',
   description: '可视化 Ren\'Py 开发工具 · A Pupurin° Project · 仆仆铃°工作室',
-  version: '0.3.0',
+  version: '0.3.1',
   license: 'MIT License',
   // 图片素材：放入 public/images/ 后在此填写对应路径（以站点 base 开头），留空则隐藏图片位
   images: {
