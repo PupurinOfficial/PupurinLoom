@@ -6,7 +6,7 @@ import type { ProjectMeta, UpdateCheckResult } from '../types'
 import logoUrl from '../assets/pupurin-logo.png'
 
 // 与 package.json version 保持一致（发版时同步更新）
-const APP_VERSION = '0.3.0'
+const APP_VERSION = '0.3.1'
 
 export default function ProjectPicker() {
   const projects = useStore((s) => s.projects)

@@ -1,6 +1,6 @@
 {
   "name": "pupurin-loom",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "铃言织机° (Pupurin° Loom) — 可视化 Ren'Py 开发工具 · A Pupurin° Project · 仆仆铃°工作室",
   "main": "out/main/index.js",
   "author": "仆仆铃°工作室 <https://space.bilibili.com/3546379813129005>",

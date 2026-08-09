@@ -385,16 +385,28 @@ export async function deleteProject(id: string): Promise<void> {
 }
 
 // 导入已有 Ren'Py 项目：复制到 userData/projects/ 目录后注册
+// 兼容两种目录布局：
+//   1. 标准布局：<root>/game/script.rpy
+//   2. 扁平布局：文件夹本身就是 game 目录，直接含 script.rpy
 export async function importProject(sourcePath: string): Promise<Project> {
   const sourceRoot = resolve(sourcePath)
-  const sourceGameDir = join(sourceRoot, 'game')
-  const sourceScriptPath = join(sourceGameDir, 'script.rpy')
 
-  // 验证是有效的 Ren'Py 项目
+  // 检测布局：优先标准 game/ 目录，其次把整个目录当作 game 目录
+  const standardScript = join(sourceRoot, 'game', 'script.rpy')
+  const flatScript = join(sourceRoot, 'script.rpy')
+  let layout: 'standard' | 'flat' | null = null
   try {
-    await fs.access(sourceScriptPath)
+    await fs.access(standardScript)
+    layout = 'standard'
   } catch {
-    throw new Error(`路径「${sourceRoot}」下未找到 game/script.rpy，不是有效的 Ren'Py 项目目录。`)
+    try {
+      await fs.access(flatScript)
+      layout = 'flat'
+    } catch {
+      throw new Error(
+        `路径「${sourceRoot}」下既没有 game/script.rpy，也没有直接的 script.rpy，不是有效的 Ren'Py 项目目录。`
+      )
+    }
   }
 
   const projectName = sourceRoot.split('/').pop() ?? '导入的项目'
@@ -409,10 +421,16 @@ export async function importProject(sourcePath: string): Promise<Project> {
   }
 
   // 复制项目到 userData/projects/（先确保父目录存在）
-  console.log('[projectStore] 复制项目:', sourceRoot, '->', targetRoot)
+  console.log('[projectStore] 复制项目:', sourceRoot, '->', targetRoot, `(layout=${layout})`)
   try {
     await fs.mkdir(getDefaultProjectsDir(), { recursive: true })
-    await execFileAsync('cp', ['-R', sourceRoot, targetRoot])
+    if (layout === 'flat') {
+      // 扁平布局：把源目录内容复制到 targetRoot/game/，保持应用内的 game/script.rpy 约定
+      await fs.mkdir(join(targetRoot, 'game'), { recursive: true })
+      await execFileAsync('cp', ['-R', `${sourceRoot}/.`, join(targetRoot, 'game')])
+    } else {
+      await execFileAsync('cp', ['-R', sourceRoot, targetRoot])
+    }
     console.log('[projectStore] 复制成功')
   } catch (e) {
     const err = e as NodeJS.ErrnoException
