@@ -51,7 +51,7 @@ jobs:
       - name: Upload assets to Release
         uses: softprops/action-gh-release@v2
         with:
-          overwrite: true
+          overwrite_files: true
           files: |
             app/release/*.dmg
             app/release/*.zip
@@ -97,7 +97,7 @@ jobs:
       - name: Upload assets to Release
         uses: softprops/action-gh-release@v2
         with:
-          overwrite: true
+          overwrite_files: true
           files: |
             app/release/*.exe
             app/release/*.blockmap
