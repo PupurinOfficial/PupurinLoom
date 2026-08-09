@@ -5,9 +5,8 @@ const base = import.meta.env.BASE_URL
 ---
 <section class="hero" id="top">
   <img class="hero-logo" src={`${base}pupurin-logo.png`} alt={site.name} />
-  <h1>{site.name}</h1>
-  <p class="en">{site.nameEn}</p>
-  <p class="slogan" data-i18n="hero.slogan">「{site.slogan}」</p>
+  <h1 data-i18n="site.name">{site.name}</h1>
+  <p class="en" data-i18n-hide="en">{site.nameEn}</p>
   <p class="desc" data-i18n="hero.desc">{site.description}</p>
   <div class="hero-cta">
     <a class="btn btn-primary" href="#download" data-i18n="hero.download">立即下载</a>

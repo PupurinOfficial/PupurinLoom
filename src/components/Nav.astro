@@ -7,7 +7,7 @@ const base = import.meta.env.BASE_URL
 <nav class="site-nav">
   <a class="nav-brand" href="#top">
     <img src={`${base}pupurin-logo.png`} alt={site.name} />
-    <span>{site.name}</span><small>{site.nameEn}</small>
+    <span data-i18n="site.name">{site.name}</span><small data-i18n-hide="en">{site.nameEn}</small>
   </a>
   <div class="nav-links">
     {nav.map((n) => <a href={`#${n.id}`} data-i18n={`nav.${n.id}`}>{n.label}</a>)}

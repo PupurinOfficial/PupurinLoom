@@ -1,10 +1,11 @@
 ---
 import { site } from '../config'
 import Icon from './Icon.astro'
+import TitleRing from './TitleRing.astro'
 ---
 <section class="download-wrap">
   <div class="section" id="download">
-    <h2 class="section-title" data-i18n="download.title">下载</h2>
+    <h2 class="section-title"><TitleRing i18n="download.title">下载</TitleRing></h2>
     <p class="section-sub" data-i18n="download.sub">跨平台可视化 Ren'Py 开发工具，支持 macOS 与 Windows。</p>
     <div class="version-line">
       <span class="badge">v{site.version}</span>

@@ -42,6 +42,11 @@ function apply(lang: Lang): void {
     const text = dict[key]
     if (text !== undefined) el.textContent = text
   })
+  // 在指定语言下隐藏的元素（data-i18n-hide="en"：英文模式下隐藏副标题英文名，避免重复）
+  document.querySelectorAll<HTMLElement>('[data-i18n-hide]').forEach((el) => {
+    const hideFor = (el.dataset.i18nHide || '').split(',').map((s) => s.trim())
+    el.style.display = hideFor.includes(lang) ? 'none' : ''
+  })
   document.querySelectorAll<HTMLElement>('[data-lang-opt]').forEach((btn) => {
     const active = btn.dataset.langOpt === lang
     btn.classList.toggle('active', active)

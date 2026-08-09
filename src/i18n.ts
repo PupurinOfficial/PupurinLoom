@@ -41,6 +41,7 @@ const zh: Record<string, string> = {
 nav.forEach((n) => {
   zh[`nav.${n.id}`] = n.label
 })
+zh['site.name'] = site.name
 zh['hero.slogan'] = `「${site.slogan}」`
 zh['hero.desc'] = site.description
 zh['about.p1'] = `${site.name}（${site.nameEn}）是仆仆铃°工作室出品的可视化 Ren'Py 开发工具，以「${site.slogan}」为理念，希望让文字冒险游戏的创作像织布一样从容。`
@@ -55,6 +56,8 @@ steps.forEach((s, i) => {
 })
 
 const en: Record<string, string> = {
+  // 产品名：英文下译为 Pupurin° Loom
+  'site.name': 'Pupurin° Loom',
   // 导航
   'nav.features': 'Features',
   'nav.download': 'Download',

@@ -1,9 +1,10 @@
 ---
 import { features, site } from '../config'
 import Icon from './Icon.astro'
+import TitleRing from './TitleRing.astro'
 ---
 <section class="section" id="features">
-  <h2 class="section-title" data-i18n="features.title">特性</h2>
+  <h2 class="section-title"><TitleRing i18n="features.title">特性</TitleRing></h2>
   <p class="section-sub" data-i18n="features.sub">围绕 Ren'Py 剧本创作打造的完整工作台 —— 从剧情编排到打包发行。</p>
   <div class="feature-grid">
     {features.map((f) => (

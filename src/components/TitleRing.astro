@@ -1,0 +1,18 @@
+---
+// 大标题「马克笔高亮」：SVG 半透明金色色块衬在文字后，模拟马克笔划重点。
+// 形状为平滑圆角矩形，仅轻微倾斜，避免歪扭感。
+// i18n 可选：传入词典键时内部文字参与语言切换。
+interface Props {
+  i18n?: string
+}
+const { i18n } = Astro.props
+---
+<span class="title-ring">
+  <svg class="title-ring-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+    <path
+      class="title-ring-path"
+      d="M14 30 C14 18 24 12 36 11 L62 10 C74 10 86 14 87 26 L89 58 C90 72 86 86 72 88 L36 90 C22 91 10 84 11 70 L12 42 C12 36 13 33 14 30 Z"
+    />
+  </svg>
+  <span class="title-ring-text" data-i18n={i18n}><slot /></span>
+</span>

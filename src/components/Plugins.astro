@@ -1,13 +1,14 @@
 ---
 import { site } from '../config'
 import Icon from './Icon.astro'
+import TitleRing from './TitleRing.astro'
 // 本地副本：构建期初始渲染数据 + 弱网/离线兜底（定期与 Loom-PluginStore 仓库 plugins.json 同步）
 import storeData from '../data/plugins.json'
 
 const initialPlugins = storeData.plugins
 ---
 <section class="section" id="plugins">
-  <h2 class="section-title" data-i18n="plugins.title">插件生态</h2>
+  <h2 class="section-title"><TitleRing i18n="plugins.title">插件生态</TitleRing></h2>
   <p class="section-sub" data-i18n="plugins.sub">
     应用内置插件系统：命令、面板、事件钩子与右侧功能栏，还能通过插件商城一键安装社区插件。
     以下插件列表实时读取插件商城仓库数据。

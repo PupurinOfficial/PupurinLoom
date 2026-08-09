@@ -1,8 +1,9 @@
 ---
 import { steps } from '../config'
+import TitleRing from './TitleRing.astro'
 ---
 <section class="section" id="guide">
-  <h2 class="section-title" data-i18n="guide.title">快速上手</h2>
+  <h2 class="section-title"><TitleRing i18n="guide.title">快速上手</TitleRing></h2>
   <p class="section-sub" data-i18n="guide.sub">从安装到发布，四步就能织出你的第一部视觉小说。</p>
   <div class="step-list">
     {steps.map((s, i) => (
