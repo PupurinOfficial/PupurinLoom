@@ -10,7 +10,16 @@ const base = import.meta.env.BASE_URL
     <span>{site.name}</span><small>{site.nameEn}</small>
   </a>
   <div class="nav-links">
-    {nav.map((n) => <a href={`#${n.id}`}>{n.label}</a>)}
+    {nav.map((n) => <a href={`#${n.id}`} data-i18n={`nav.${n.id}`}>{n.label}</a>)}
+    <div class="nav-lang" data-lang-wrap>
+      <button type="button" class="nav-lang-btn" data-lang-btn aria-label="Language" aria-haspopup="true" aria-expanded="false">
+        <Icon name="globe" size={16} />
+      </button>
+      <div class="nav-lang-menu" data-lang-menu hidden>
+        <button type="button" data-lang-opt="zh">中文</button>
+        <button type="button" data-lang-opt="en">English</button>
+      </div>
+    </div>
     <a class="nav-gh" href={site.urls.appRepo} target="_blank" rel="noopener">
       <Icon name="github" size={15} /> GitHub
     </a>

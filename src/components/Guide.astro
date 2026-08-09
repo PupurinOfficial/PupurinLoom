@@ -2,14 +2,14 @@
 import { steps } from '../config'
 ---
 <section class="section" id="guide">
-  <h2 class="section-title">快速上手</h2>
-  <p class="section-sub">从安装到发布，四步就能织出你的第一部视觉小说。</p>
+  <h2 class="section-title" data-i18n="guide.title">快速上手</h2>
+  <p class="section-sub" data-i18n="guide.sub">从安装到发布，四步就能织出你的第一部视觉小说。</p>
   <div class="step-list">
     {steps.map((s, i) => (
       <div class="step-card">
         <div class="step-num">{String(i + 1).padStart(2, '0')}</div>
-        <h3>{s.title}</h3>
-        <p>{s.desc}</p>
+        <h3 data-i18n={`step.${i}.title`}>{s.title}</h3>
+        <p data-i18n={`step.${i}.desc`}>{s.desc}</p>
       </div>
     ))}
   </div>

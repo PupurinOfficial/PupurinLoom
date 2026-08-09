@@ -104,6 +104,69 @@ a {
   background: var(--accent-soft);
 }
 
+/* ---------- 语言切换 ---------- */
+.nav-lang {
+  position: relative;
+  display: flex;
+}
+
+.nav-lang-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.nav-lang-btn:hover {
+  border-color: var(--accent-dim);
+  background: var(--accent-soft);
+}
+
+.nav-lang-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 110px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(28, 28, 30, 0.95);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  z-index: 60;
+}
+
+.nav-lang-menu button {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.nav-lang-menu button:hover {
+  background: var(--accent-soft);
+}
+
+.nav-lang-menu button.active {
+  color: var(--accent);
+  font-weight: 600;
+}
+
 /* ---------- 布局容器 ---------- */
 .section {
   max-width: 1080px;
