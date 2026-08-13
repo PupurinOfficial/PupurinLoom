@@ -59,6 +59,12 @@ export interface DialogueBlock {
   // show / hide
   showCharVar?: string
   showSprite?: string
+  /** 显示/隐藏目标类型：sprite=角色立绘；cg=画廊CG；other=images/ 下任意图片（不写 # loom: 标记，靠 images/ 列表确定性分类） */
+  showKind?: 'sprite' | 'cg' | 'other'
+  /** 图片名（cg/other 用，含空格时如 "海边 晴" / "bg beach"） */
+  showImage?: string
+  /** 用户显式切换过类型（sprite/cg 序列化为 `# loom:<kind>` 注释持久化；other 不写标记） */
+  showExplicit?: boolean
   // default
   varName?: string
   varValue?: string
@@ -113,11 +119,12 @@ const OPEN_URL_RE = /^\s*\$\s*renpy\.open_url\s*\(\s*["'](.+?)["']\s*\)\s*(?:#.*
 // scene background  [with transition]
 const SCENE_RE = /^\s*scene\s+([A-Za-z_]\w*)\s*(?:with\s+\w+)?\s*(?:#.*)?$/
 
-// show charVar [sprite]  [with transition]
-const SHOW_RE = /^\s*show\s+([A-Za-z_]\w*)\s*(?:([A-Za-z_]\w*))?\s*(?:with\s+\w+)?\s*(?:#.*)?$/
+// show/hide 目标可为角色（char var）或图片名（画廊CG，可含空格/中文）。
+// 解析时统一按「首词 + 次词」拆（角色/CG 代码层面等价，CG 识别交给 UI 层）。
+const SHOW_RE = /^\s*show\s+(\S+)(?:\s+(\S+))?(?:\s+with\s+\S+)?\s*(?:#.*)?$/
 
 // hide charVar [sprite]  [with transition]
-const HIDE_RE = /^\s*hide\s+([A-Za-z_]\w*)\s*(?:([A-Za-z_]\w*))?\s*(?:with\s+\w+)?\s*(?:#.*)?$/
+const HIDE_RE = /^\s*hide\s+(\S+)(?:\s+(\S+))?(?:\s+with\s+\S+)?\s*(?:#.*)?$/
 
 // default varName = value
 const DEFAULT_RE = /^\s*default\s+([A-Za-z_]\w*)\s*=\s*(.+?)\s*(?:#.*)?$/
@@ -170,12 +177,30 @@ function parseLine(line: string, lineNum: number): DialogueBlock | null {
 
   const shm = line.match(SHOW_RE)
   if (shm) {
-    return { type: 'show', line: lineNum, raw: line, showCharVar: shm[1], showSprite: shm[2] }
+    const loomKind = /#\s*loom:(sprite|cg)\b/.exec(line)
+    return {
+      type: 'show',
+      line: lineNum,
+      raw: line,
+      showCharVar: shm[1],
+      showSprite: shm[2],
+      showKind: loomKind ? (loomKind[1] as 'sprite' | 'cg') : undefined,
+      showExplicit: loomKind ? true : undefined,
+    }
   }
 
   const hdm = line.match(HIDE_RE)
   if (hdm) {
-    return { type: 'hide', line: lineNum, raw: line, showCharVar: hdm[1], showSprite: hdm[2] }
+    const loomKind = /#\s*loom:(sprite|cg)\b/.exec(line)
+    return {
+      type: 'hide',
+      line: lineNum,
+      raw: line,
+      showCharVar: hdm[1],
+      showSprite: hdm[2],
+      showKind: loomKind ? (loomKind[1] as 'sprite' | 'cg') : undefined,
+      showExplicit: loomKind ? true : undefined,
+    }
   }
 
   const dftm = line.match(DEFAULT_RE)
@@ -455,4 +480,49 @@ export function computeCharSpriteStates(blocks: DialogueBlock[]): Map<string, Ch
     }
   }
   return states
+}
+
+/** 依据画廊 CG 名列表 + images/ 图片名列表，把 show/hide 块分类为 立绘(sprite) / 画廊CG(cg) / 其他(other)。
+ *  命中画廊 CG 全名（可含空格）→ cg；命中 images/ 自动图片名 → other；否则一律 sprite。
+ *  显式 showKind（用户切换或 # loom: 注释）保持不变。「其他」不写代码标记，靠 images/ 列表确定性分类。
+ *  递归处理 if/menu 等嵌套子块。放在 parse 之后执行，保证「切换 → 保存 → 重新解析」后分类稳定（不依赖角色名匹配启发式）。 */
+export function classifyShowBlocks(blocks: DialogueBlock[], cgImages: string[], otherImages?: string[]): DialogueBlock[] {
+  const cgSet = new Set(cgImages)
+  const otherSet = new Set(otherImages ?? [])
+  // 分类单个块
+  const classifyOne = (b: DialogueBlock): DialogueBlock => {
+    if (b.type !== 'show' && b.type !== 'hide') return b
+    if (b.showKind === 'cg' || b.showKind === 'other') {
+      // 归一化：从注释/画廊反解析回的块可能只有 showCharVar+showSprite，补齐 showImage 并清空字符字段
+      if (!b.showImage) {
+        const full = [b.showCharVar, b.showSprite].filter(Boolean).join(' ')
+        if (full) return { ...b, showImage: full, showCharVar: undefined, showSprite: undefined }
+      }
+      return b
+    }
+    if (b.showKind === 'sprite') return b
+    const full = [b.showCharVar, b.showSprite].filter(Boolean).join(' ')
+    if (full && cgSet.has(full)) {
+      return { ...b, showKind: 'cg', showImage: full, showCharVar: undefined, showSprite: undefined }
+    }
+    if (full && otherSet.has(full)) {
+      return { ...b, showKind: 'other', showImage: full, showCharVar: undefined, showSprite: undefined }
+    }
+    return { ...b, showKind: 'sprite' }
+  }
+  // 递归：分类自身 + 嵌套子块
+  const recurse = (b: DialogueBlock): DialogueBlock => {
+    const c = classifyOne(b)
+    if (c.type === 'if' && c.branches) {
+      return { ...c, branches: c.branches.map((br) => ({ ...br, children: br.children.map(recurse) })) }
+    }
+    if (c.type === 'menu' && c.options) {
+      return { ...c, options: c.options.map((o) => ({ ...o, children: (o.children ?? []).map(recurse) })) }
+    }
+    if (c.children) {
+      return { ...c, children: c.children.map(recurse) }
+    }
+    return c
+  }
+  return blocks.map(recurse)
 }

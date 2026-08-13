@@ -1,11 +1,12 @@
 import { app, BrowserWindow, ipcMain, dialog, shell, Notification, net, type BrowserWindow as BW } from 'electron'
-import { join, resolve, extname, basename } from 'node:path'
+import { join, resolve, extname, basename, dirname } from 'node:path'
 import { promises as fs } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { tmpdir, homedir } from 'node:os'
 import { spawn, spawnSync } from 'node:child_process'
 import { createServer } from 'node:http'
 import { BackendManager } from './pythonBridge'
+import { buildApplicationMenu, setViewMenu } from './menu'
 import {
   listProjects,
   createProject,
@@ -46,6 +47,7 @@ import {
   pluginFsRead,
   pluginFsWrite,
   pluginFsList,
+  pluginFsUploadImage,
   pluginHttp,
   pluginExec,
   createPluginFromTemplate,
@@ -268,7 +270,18 @@ function createWindow(): void {
   mainWindow.on('leave-full-screen', () => {
     mainWindow?.webContents.send('window:fullscreen', false)
   })
+
+  // macOS 系统菜单栏（自定义动作经 menu:action 派发给渲染层）
+  buildApplicationMenu(mainWindow)
 }
+
+// 渲染层同步菜单：activeView 变化 → 更新「视图」菜单 radio 勾选
+ipcMain.on('menu:setView', (_e, view: string) => {
+  setViewMenu(view)
+})
+
+// 查询窗口当前是否全屏（渲染层组件重挂载时用于初始化红绿灯占位状态）
+ipcMain.handle('window:isFullscreen', () => mainWindow?.isFullScreen() ?? false)
 
 // ad-hoc 签名下 Chromium 沙箱无法初始化，禁用沙箱
 app.commandLine.appendSwitch('no-sandbox')
@@ -1368,6 +1381,7 @@ ipcMain.handle('plugins:fsWrite', (_e, projectPath: string, subPath: string, con
   pluginFsWrite(projectPath, subPath, content)
 )
 ipcMain.handle('plugins:fsList', (_e, projectPath: string, subDir: string) => pluginFsList(projectPath, subDir))
+ipcMain.handle('plugins:uploadImage', (_e, projectPath: string) => pluginFsUploadImage(mainWindow, projectPath))
 ipcMain.handle('plugins:http', (_e, method: string, url: string, body?: string, headers?: Record<string, string>) =>
   pluginHttp(method, url, body, headers))
 ipcMain.handle('plugins:exec', (_e, command: string) => pluginExec(mainWindow, command))
@@ -1664,6 +1678,37 @@ ipcMain.handle('fs:importFile', async (_e, projectPath: string, destSubDir: stri
   return join(destSubDir, fileName)
 })
 
+// 上传图片到 game/images/（图形编辑器「其他」目标）：系统多选图片 → 复制到 images/，
+// 同名文件自动追加 _1/_2 后缀避免覆盖。返回 game/ 相对路径 + Ren'Py 自动图片名（去扩展名）。
+ipcMain.handle('fs:importImages', async (e, projectPath: string) => {
+  const opts: Electron.OpenDialogOptions = {
+    title: '选择要上传的图片（将复制到项目的 images/ 文件夹）',
+    properties: ['openFile', 'multiSelections'],
+    filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] }],
+  }
+  const result = mainWindow
+    ? await dialog.showOpenDialog(mainWindow, opts)
+    : await dialog.showOpenDialog(opts)
+  if (result.canceled || result.filePaths.length === 0) return []
+  const imagesDir = join(projectPath, 'game', 'images')
+  await fs.mkdir(imagesDir, { recursive: true })
+  const out: Array<{ path: string; name: string }> = []
+  for (const src of result.filePaths) {
+    const ext = extname(src).toLowerCase()
+    const base = basename(src, ext).replace(/[\\/:*?"<>|]/g, '_') || 'image'
+    let target = join(imagesDir, `${base}${ext}`)
+    let n = 1
+    while (await fs.access(target).then(() => true).catch(() => false)) {
+      target = join(imagesDir, `${base}_${n}${ext}`)
+      n++
+    }
+    await fs.copyFile(src, target)
+    const fileName = basename(target)
+    out.push({ path: `images/${fileName}`, name: fileName.replace(/\.[^.]+$/, '') })
+  }
+  return out
+})
+
 // 移动文件/文件夹（拖拽移动）
 ipcMain.handle('fs:moveFile', async (_e, projectPath: string, srcPath: string, destDir: string) => {
   console.log('[moveFile] projectPath:', projectPath)
@@ -1905,6 +1950,15 @@ ipcMain.handle('fs:readImageBase64', async (_e, projectPath: string, subPath: st
   const ext = subPath.split('.').pop()?.toLowerCase() ?? 'png'
   const mime = ext === 'jpg' || ext === 'jpeg' ? 'jpeg' : ext === 'webp' ? 'webp' : 'png'
   return `data:image/${mime};base64,${data.toString('base64')}`
+})
+
+// 写入图片（dataURL 形式）——UI 设计器「自动生成底图」落地到 gui/
+ipcMain.handle('fs:writeImageBase64', async (_e, projectPath: string, subPath: string, dataUrl: string) => {
+  const m = /^data:image\/(png|jpeg|webp);base64,(.+)$/.exec(dataUrl)
+  if (!m) throw new Error('invalid image data url')
+  const target = join(projectPath, 'game', subPath)
+  await fs.mkdir(dirname(target), { recursive: true })
+  await fs.writeFile(target, Buffer.from(m[2], 'base64'))
 })
 
 // 读取音频为 base64（用于预览/时长）

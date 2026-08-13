@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { useStore } from '../store/useStore'
 import NonAsciiRenameDialog from '../components/NonAsciiRenameDialog'
+import PageHeader from '../components/ui/PageHeader'
 import type { NonAsciiRenameItem } from '../types'
 
 interface SdkStatus {
@@ -301,37 +302,17 @@ export default function PackagePage() {
 
   return (
     <div className="flex flex-col h-full">
-      {/* 标题栏 + Tab 切换 */}
-      <div className="flex items-center px-4 h-10 border-b border-loom-border bg-loom-panel2 gap-1">
-        <h1 className="text-sm font-semibold text-loom-text mr-4">打包发布</h1>
-        <button
-          onClick={() => setTab('app')}
-          className={[
-            'px-3 py-1.5 rounded text-xs font-medium transition-colors',
-            tab === 'app' ? 'bg-loom-accent/20 text-loom-accent' : 'text-loom-muted hover:text-loom-text',
-          ].join(' ')}
-        >
-          桌面应用
-        </button>
-        <button
-          onClick={() => setTab('web')}
-          className={[
-            'px-3 py-1.5 rounded text-xs font-medium transition-colors',
-            tab === 'web' ? 'bg-loom-accent/20 text-loom-accent' : 'text-loom-muted hover:text-loom-text',
-          ].join(' ')}
-        >
-          网页应用
-        </button>
-        <button
-          onClick={() => setTab('mobile')}
-          className={[
-            'px-3 py-1.5 rounded text-xs font-medium transition-colors',
-            tab === 'mobile' ? 'bg-loom-accent/20 text-loom-accent' : 'text-loom-muted hover:text-loom-text',
-          ].join(' ')}
-        >
-          移动应用
-        </button>
-      </div>
+      {/* 页头 + Tab 切换 */}
+      <PageHeader
+        title="打包发布"
+        tabs={[
+          { id: 'app', label: '桌面应用' },
+          { id: 'web', label: '网页应用' },
+          { id: 'mobile', label: '移动应用' },
+        ]}
+        activeTab={tab}
+        onTabChange={(id) => setTab(id as PackageTab)}
+      />
 
       {/* 主内容 */}
       <div className="flex-1 p-6 overflow-auto">

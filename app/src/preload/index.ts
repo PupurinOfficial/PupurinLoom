@@ -148,6 +148,16 @@ const api = {
     ipcRenderer.on('window:fullscreen', handler)
     return () => ipcRenderer.removeListener('window:fullscreen', handler)
   },
+  // 查询窗口当前是否全屏（组件重挂载时初始化红绿灯占位）
+  getIsFullscreen: (): Promise<boolean> => ipcRenderer.invoke('window:isFullscreen'),
+  // macOS 系统菜单动作（返回 cleanup 函数）
+  onMenuAction: (cb: (action: { id: string }) => void): (() => void) => {
+    const handler = (_e: unknown, action: { id: string }): void => cb(action)
+    ipcRenderer.on('menu:action', handler)
+    return () => ipcRenderer.removeListener('menu:action', handler)
+  },
+  // 同步当前视图到「视图」菜单的 radio 勾选
+  setMenuView: (view: string): void => ipcRenderer.send('menu:setView', view),
 
   // 插件系统
   listPlugins: (): Promise<PluginMeta[]> => ipcRenderer.invoke('plugins:list'),
@@ -168,6 +178,8 @@ const api = {
     ipcRenderer.invoke('plugins:fsWrite', projectPath, subPath, content),
   pluginFsList: (projectPath: string, subDir: string): Promise<Array<{ name: string; isDir: boolean; path: string }>> =>
     ipcRenderer.invoke('plugins:fsList', projectPath, subDir),
+  pluginFsUploadImage: (projectPath: string): Promise<{ path: string; name: string; cancelled: boolean }> =>
+    ipcRenderer.invoke('plugins:uploadImage', projectPath),
   pluginHttp: (method: string, url: string, body?: string, headers?: Record<string, string>): Promise<{ ok: boolean; status: number; text: string }> =>
     ipcRenderer.invoke('plugins:http', method, url, body, headers),
   pluginExec: (command: string): Promise<{ code: number | null; stdout: string; stderr: string }> =>
@@ -225,12 +237,16 @@ const api = {
     ipcRenderer.invoke('fs:readFile', projectPath, subPath),
   importFile: (projectPath: string, destSubDir: string, srcFilePath: string): Promise<string> =>
     ipcRenderer.invoke('fs:importFile', projectPath, destSubDir, srcFilePath),
+  importImages: (projectPath: string): Promise<Array<{ path: string; name: string }>> =>
+    ipcRenderer.invoke('fs:importImages', projectPath),
   pickFiles: (): Promise<string[]> =>
     ipcRenderer.invoke('dialog:pickFiles'),
   pickAudioFiles: (): Promise<string[]> =>
     ipcRenderer.invoke('dialog:pickAudioFiles'),
   readImageBase64: (projectPath: string, subPath: string): Promise<string> =>
     ipcRenderer.invoke('fs:readImageBase64', projectPath, subPath),
+  writeImageBase64: (projectPath: string, subPath: string, dataUrl: string): Promise<void> =>
+    ipcRenderer.invoke('fs:writeImageBase64', projectPath, subPath, dataUrl),
   readAudioBase64: (projectPath: string, subPath: string): Promise<string> =>
     ipcRenderer.invoke('fs:readAudioBase64', projectPath, subPath),
   // 非 ASCII 文件名检查与修复（Ren'Py 要求游戏内文件名必须为 ASCII，否则安卓加载失败）

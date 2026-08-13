@@ -1,11 +1,13 @@
 import { useMemo, useState, useRef, useCallback, useEffect, Fragment, type KeyboardEvent } from 'react'
 import { useStore } from '../store/useStore'
-import { parseDialogue, computeCharSpriteStates, type DialogueBlock, type CharSpriteState, type BlockType, type IfBranch } from '../utils/dialogueParser'
+import { usePlugins } from '../store/plugins'
+import { parseDialogue, classifyShowBlocks, computeCharSpriteStates, type DialogueBlock, type CharSpriteState, type BlockType, type IfBranch } from '../utils/dialogueParser'
 import { parseRenpyText, styleToCss, type TextStyle } from '../utils/renpyTextParser'
 import { extractVarNames } from '../utils/varExtractor'
-import { useProjectImagePaths } from '../hooks/useProjectImage'
+import { useProjectImage, useProjectImagePaths } from '../hooks/useProjectImage'
 import { useProjectAudioDuration } from '../hooks/useProjectAudio'
 import Avatar from './Avatar'
+import { SpriteThumbnail } from './CharacterAvatar'
 import CommandPalette from './CommandPalette'
 import RichTextDialog from './RichTextDialog'
 import {
@@ -60,7 +62,15 @@ function StyledText({
 }
 
 export default function DialogueView({ source, onChange, lineBaseOffset = 1, onPlayFromLine, focusLine }: DialogueViewProps) {
-  const blocks = useMemo(() => parseDialogue(source), [source])
+  // 画廊 CG 名（gallery.rpy）+ images/ 图片名：决定 show/hide 块分类为 立绘 / 画廊CG / 其他
+  const cgImages = useGalleryCgNames()
+  const imagesTick = useStore((s) => s.imagesTick)
+  const otherImages = useOtherImages(imagesTick)
+  const otherNames = useMemo(() => otherImages.map((i) => i.name), [otherImages])
+  const blocks = useMemo(
+    () => classifyShowBlocks(parseDialogue(source), cgImages, otherNames),
+    [source, cgImages, otherNames]
+  )
 
   // 顶层块容器 ref，用于 focusLine 定位滚动
   const blockRefs = useRef<(HTMLDivElement | null)[]>([])
@@ -607,6 +617,8 @@ interface EditableBlockProps {
 function EditableBlock({ block, onUpdate, onDelete, onStopEdit }: EditableBlockProps) {
   const characters = useStore((s) => s.characters)
   const variables = useStore((s) => s.variables)
+  // 显示/隐藏目标选择弹窗
+  const [targetDialog, setTargetDialog] = useState<{ open: boolean; kind: 'sprite' | 'cg' | 'other' }>({ open: false, kind: 'sprite' })
   const [textDraft, setTextDraft] = useState(block.text ?? '')
   const textDraftRef = useRef(textDraft)
   textDraftRef.current = textDraft
@@ -813,34 +825,82 @@ function EditableBlock({ block, onUpdate, onDelete, onStopEdit }: EditableBlockP
       )
 
     case 'show':
-    case 'hide':
+    case 'hide': {
+      const targetKind: 'sprite' | 'cg' | 'other' =
+        block.showKind === 'other' ? 'other' : block.showKind === 'cg' ? 'cg' : 'sprite'
+      // 当前目标摘要（供按钮显示）
+      const curLabel = [block.showImage, block.showCharVar, block.showSprite].filter(Boolean).join(' ')
+      const kindBadge =
+        targetKind === 'cg'
+          ? { text: '画廊CG', cls: 'bg-loom-accent/15 text-loom-accent' }
+          : targetKind === 'other'
+            ? { text: '其他', cls: 'bg-loom-warn/15 text-loom-warn' }
+            : { text: '立绘', cls: 'bg-loom-ok/15 text-loom-ok' }
       return (
-        <div className="p-3 rounded-lg bg-loom-bg border border-loom-accent/50 space-y-2">
-          <div className="flex items-center gap-2">
-            <label className="text-[10px] text-loom-muted w-12">角色</label>
-            <select
-              value={block.showCharVar ?? ''}
-              onChange={(e) => onUpdate({ showCharVar: e.target.value })}
-              className="bg-loom-panel border border-loom-border rounded px-2 py-1 text-xs font-mono text-loom-text flex-1"
-            >
-              {characters.map((c) => (
-                <option key={c.id} value={c.varName}>{c.varName} ({c.name})</option>
-              ))}
-              {!characters.find((c) => c.varName === block.showCharVar) && (
-                <option value={block.showCharVar}>{block.showCharVar}</option>
-              )}
-            </select>
-            <input
-              type="text"
-              value={block.showSprite ?? ''}
-              onChange={(e) => onUpdate({ showSprite: e.target.value || undefined })}
-              placeholder="差分 (可选)"
-              className="bg-loom-panel border border-loom-border rounded px-2 py-1 text-xs font-mono text-loom-text w-28"
-            />
+        <>
+          <div className="p-3 rounded-lg bg-loom-bg border border-loom-accent/50 space-y-2">
+            <div className="flex items-center gap-2">
+              <label className="text-[10px] text-loom-muted w-12">目标</label>
+              <button
+                type="button"
+                onClick={() => setTargetDialog({ open: true, kind: targetKind })}
+                className="flex-1 flex items-center gap-2 px-2 py-1.5 rounded bg-loom-panel border border-loom-border hover:border-loom-accent text-left transition-colors"
+              >
+                <span className={`flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded ${kindBadge.cls}`}>
+                  {kindBadge.text}
+                </span>
+                <span className="flex-1 min-w-0 truncate text-xs font-mono text-loom-text">
+                  {curLabel || '（未选择）'}
+                </span>
+                <span className="flex-shrink-0 text-[10px] text-loom-muted">选择…</span>
+              </button>
+            </div>
+            <EditableActions onDelete={onDelete} onStopEdit={onStopEdit} />
           </div>
-          <EditableActions onDelete={onDelete} onStopEdit={onStopEdit} />
-        </div>
+          <ShowTargetDialog
+            open={targetDialog.open}
+            initialKind={targetKind}
+            current={
+              targetKind === 'cg'
+                ? { kind: 'cg', name: curLabel }
+                : targetKind === 'other'
+                  ? { kind: 'other', name: curLabel }
+                  : { kind: 'sprite', charVar: block.showCharVar ?? '', sprite: block.showSprite }
+            }
+            onClose={() => setTargetDialog((s) => ({ ...s, open: false }))}
+            onSelect={(sel) => {
+              if (sel.kind === 'cg') {
+                onUpdate({
+                  showKind: 'cg',
+                  showImage: sel.name,
+                  showCharVar: undefined,
+                  showSprite: undefined,
+                  showExplicit: true,
+                })
+              } else if (sel.kind === 'other') {
+                // 其他：images/ 下的任意图片，无需 # loom: 标记（按 Ren'Py 自动图片名输出 show <name>）
+                onUpdate({
+                  showKind: 'other',
+                  showImage: sel.name,
+                  showCharVar: undefined,
+                  showSprite: undefined,
+                  showExplicit: false,
+                })
+              } else {
+                onUpdate({
+                  showKind: 'sprite',
+                  showImage: undefined,
+                  showCharVar: sel.charVar,
+                  showSprite: sel.sprite || undefined,
+                  showExplicit: true,
+                })
+              }
+              setTargetDialog((s) => ({ ...s, open: false }))
+            }}
+          />
+        </>
       )
+    }
 
     case 'save':
       return (
@@ -1617,8 +1677,437 @@ function SceneBlock({ block }: { block: DialogueBlock }) {
   )
 }
 
+// 画廊 CG 条目：名称 + 图片路径（缩略图用）
+interface GalleryCgEntry {
+  name: string
+  path: string
+}
+
+// 画廊 CG 列表：读取项目 game/gallery.rpy 中的 image / g.unlock_image 声明
+function useGalleryCgList(): GalleryCgEntry[] {
+  const project = useStore((s) => s.currentProject)
+  const [list, setList] = useState<GalleryCgEntry[]>([])
+  // 从 gallery.rpy 提取 CG 条目（image 定义提供路径，unlock_image 提供名称）
+  const extract = (src: string | null): GalleryCgEntry[] => {
+    if (!src) return []
+    const pathByImg = new Map<string, string>()
+    const out: GalleryCgEntry[] = []
+    const push = (t: string, path: string): void => {
+      const v = t.trim()
+      if (v && !out.some((c) => c.name === v)) out.push({ name: v, path })
+    }
+    let m: RegExpExecArray | null
+    // image X = "path"（路径可能带引号且含空格；名称可含空格）
+    const reImg = /^\s*image\s+(.+?)\s*=\s*(?:["']([^"']+)["']|(\S+))/gm
+    while ((m = reImg.exec(src))) {
+      const name = m[1].trim()
+      const path = m[2] ?? m[3] ?? ''
+      if (name) {
+        pathByImg.set(name, path)
+        push(name, path)
+      }
+    }
+    const re2 = /^\s*g\.unlock_image\(\s*["']([^"']+)["']\s*\)/gm
+    while ((m = re2.exec(src))) push(m[1], pathByImg.get(m[1].trim()) ?? '')
+    return out
+  }
+  const load = (): void => {
+    if (!project) {
+      setList([])
+      return
+    }
+    window.pupurin
+      .readFile(project.path, 'gallery.rpy')
+      .then((src) => setList(extract(src)))
+      .catch(() => setList([]))
+  }
+  useEffect(() => {
+    load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project])
+  // 画廊插件保存 gallery.rpy（loom.fs.write）后实时刷新
+  useEffect(() => {
+    if (!project) return
+    return usePlugins.getState().onHook('app:saved', (payload) => {
+      const file = payload && typeof payload === 'object' ? (payload as { file?: unknown }).file : undefined
+      if (file && /(^|[\\/])gallery\.rpy$/i.test(String(file))) load()
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project])
+  return list
+}
+
+// 画廊 CG 图片名列表（只取名称，供 classifyShowBlocks 分类）
+function useGalleryCgNames(): string[] {
+  return useGalleryCgList().map((c) => c.name)
+}
+
+// 其他图片列表：递归扫描 game/images/ 目录
+// Ren'Py 自动图片命名：路径相对 images/、去扩展名、/ 变空格（如 images/bg/beach.png → bg beach）
+// tick：store 里的 imagesTick，上传/删除图片后递增以触发重新扫描
+function useOtherImages(tick: number): { name: string; path: string }[] {
+  const project = useStore((s) => s.currentProject)
+  const [list, setList] = useState<{ name: string; path: string }[]>([])
+  useEffect(() => {
+    if (!project) {
+      setList([])
+      return
+    }
+    let alive = true
+    const IMG_EXT = /\.(png|jpe?g|webp|gif|bmp)$/i
+    const out: { name: string; path: string }[] = []
+    const walk = async (dir: string): Promise<void> => {
+      let entries: Array<{ name: string; isDir: boolean; path: string }> = []
+      try {
+        entries = await window.pupurin.listFiles(project.path, dir)
+      } catch {
+        return
+      }
+      for (const e of entries) {
+        if (!alive) return
+        if (e.isDir) {
+          await walk(e.path)
+          continue
+        }
+        if (!IMG_EXT.test(e.name)) continue
+        const rel = e.path.replace(/^images\/?/, '').replace(/\.[^.]+$/, '')
+        const name = rel.replace(/\//g, ' ').trim()
+        if (name) out.push({ name, path: e.path })
+      }
+    }
+    void walk('images')
+      .catch(() => {})
+      .finally(() => {
+        if (alive) setList(out)
+      })
+    return () => {
+      alive = false
+    }
+  }, [project, tick])
+  return list
+}
+
+// 显示/隐藏目标选择结果
+type ShowTargetSelection =
+  | { kind: 'sprite'; charVar: string; sprite?: string }
+  | { kind: 'cg'; name: string }
+  | { kind: 'other'; name: string }
+
+// 显示/隐藏目标选择弹窗：立绘（角色差分）/ 画廊CG / 其他（images/ 下任意图片）三选一，网格缩略图点选
+function ShowTargetDialog({
+  open,
+  initialKind,
+  current,
+  onClose,
+  onSelect,
+}: {
+  open: boolean
+  initialKind: 'sprite' | 'cg' | 'other'
+  current: ShowTargetSelection
+  onClose: () => void
+  onSelect: (sel: ShowTargetSelection) => void
+}) {
+  const characters = useStore((s) => s.characters)
+  const cgList = useGalleryCgList()
+  const imagesTick = useStore((s) => s.imagesTick)
+  const bumpImagesTick = useStore((s) => s.bumpImagesTick)
+  const otherImages = useOtherImages(imagesTick)
+  const projectPath = useStore((s) => s.currentProject?.path ?? '')
+  const [kind, setKind] = useState<'sprite' | 'cg' | 'other'>(initialKind)
+  const [uploading, setUploading] = useState(false)
+
+  // 打开时同步到当前类型
+  useEffect(() => {
+    if (open) setKind(initialKind)
+  }, [open, initialKind])
+
+  // 上传图片到 images/：复制后刷新列表并直接选中最后一张
+  const handleOtherUpload = async (): Promise<void> => {
+    if (!projectPath || uploading) return
+    setUploading(true)
+    try {
+      const list = await window.pupurin.importImages(projectPath)
+      if (list.length > 0) {
+        bumpImagesTick()
+        onSelect({ kind: 'other', name: list[list.length - 1].name })
+      }
+    } catch (e) {
+      console.error('上传图片失败:', e)
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  if (!open) return null
+
+  // 当前选中是否命中给定条目
+  const isSpriteSelected = (charVar: string, sprite?: string): boolean =>
+    current.kind === 'sprite' && current.charVar === charVar && (current.sprite ?? undefined) === (sprite ?? undefined)
+  const isCgSelected = (name: string): boolean => current.kind === 'cg' && current.name === name
+  const isOtherSelected = (name: string): boolean => current.kind === 'other' && current.name === name
+
+  const kindTab = (k: 'sprite' | 'cg' | 'other', label: string): JSX.Element => (
+    <button
+      onClick={() => setKind(k)}
+      className={[
+        'px-3 py-1 text-[11px] transition-colors',
+        kind === k ? 'bg-loom-accent text-loom-bg font-semibold' : 'text-loom-muted hover:text-loom-text',
+      ].join(' ')}
+    >
+      {label}
+    </button>
+  )
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
+      <div
+        className="w-[620px] max-w-[92vw] max-h-[85vh] flex flex-col rounded-lg bg-loom-panel border border-loom-border shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* 标题栏 */}
+        <div className="flex items-center px-4 py-3 border-b border-loom-border select-none">
+          <span className="text-sm font-semibold text-loom-text">选择显示目标</span>
+          <span className="ml-2 text-[10px] text-loom-muted font-mono">立绘 / 画廊CG / 其他</span>
+          <button
+            onClick={onClose}
+            className="ml-auto w-6 h-6 flex items-center justify-center rounded text-loom-muted hover:text-loom-text hover:bg-loom-panel2 transition-colors"
+            title="关闭"
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* 类型切换 */}
+        <div className="flex items-center px-4 pt-3">
+          <div className="flex rounded bg-loom-bg border border-loom-border overflow-hidden">
+            {kindTab('sprite', '立绘')}
+            {kindTab('cg', '画廊CG')}
+            {kindTab('other', '其他')}
+          </div>
+        </div>
+
+        {/* 主体：网格列表 */}
+        <div className="flex-1 min-h-0 overflow-auto p-4">
+          {kind === 'sprite' ? (
+            <div className="space-y-3">
+              {characters.length === 0 && (
+                <div className="rounded border border-loom-border border-dashed p-6 text-center text-xs text-loom-muted">
+                  暂无角色。请先在「角色」页创建角色与差分。
+                </div>
+              )}
+              {characters.map((c) => (
+                <div key={c.id} className="rounded-lg border border-loom-border overflow-hidden">
+                  {/* 角色头 */}
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-loom-panel2/60">
+                    <Avatar charVar={c.varName} size={20} />
+                    <span className="text-xs font-semibold text-loom-text">{c.name}</span>
+                    <span className="text-[10px] text-loom-muted font-mono">{c.varName}</span>
+                    <span className="ml-auto text-[10px] text-loom-muted/60">{c.sprites.length} 差分</span>
+                  </div>
+                  {/* 差分网格：默认（无差分）+ 各差分 */}
+                  <div className="p-2 grid grid-cols-4 gap-2">
+                    <TargetCard
+                      selected={isSpriteSelected(c.varName)}
+                      label="默认立绘"
+                      onClick={() => onSelect({ kind: 'sprite', charVar: c.varName })}
+                    >
+                      <Avatar charVar={c.varName} size={40} />
+                    </TargetCard>
+                    {c.sprites.length === 0 && (
+                      <div className="col-span-3 flex items-center text-[10px] text-loom-muted/60">
+                        暂无差分，可在「角色」页导入图片
+                      </div>
+                    )}
+                    {c.sprites.map((sp) => (
+                      <TargetCard
+                        key={sp.id}
+                        selected={isSpriteSelected(c.varName, sp.name)}
+                        label={sp.name}
+                        onClick={() => onSelect({ kind: 'sprite', charVar: c.varName, sprite: sp.name })}
+                      >
+                        <SpriteThumbnail path={sp.path} size={40} rounded="rounded" />
+                      </TargetCard>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : kind === 'cg' ? (
+            <div className="grid grid-cols-3 gap-2">
+              {cgList.length === 0 && (
+                <div className="col-span-3 rounded border border-loom-border border-dashed p-6 text-center text-xs text-loom-muted">
+                  暂无画廊CG。请先在「画廊」插件中添加 CG 并保存。
+                </div>
+              )}
+              {cgList.map((cg) => (
+                <TargetCard
+                  key={cg.name}
+                  selected={isCgSelected(cg.name)}
+                  label={cg.name}
+                  onClick={() => onSelect({ kind: 'cg', name: cg.name })}
+                >
+                  <CgThumb projectPath={projectPath} path={cg.path} />
+                </TargetCard>
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-loom-muted">
+                  images/ 目录 {otherImages.length} 张图片（不含立绘/画廊CG）
+                </span>
+                <button
+                  onClick={() => void handleOtherUpload()}
+                  disabled={uploading}
+                  className="flex items-center gap-1 px-2 py-1 text-[11px] rounded bg-loom-panel2 border border-loom-border text-loom-muted hover:text-loom-accent hover:border-loom-accent disabled:opacity-50 transition-colors flex-shrink-0"
+                  title="选择本地图片复制到项目的 images/ 文件夹，复制完成后自动选用"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="11" height="11">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" />
+                  </svg>
+                  {uploading ? '上传中…' : '上传图片'}
+                </button>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {otherImages.length === 0 && (
+                  <div className="col-span-3 rounded border border-loom-border border-dashed p-6 text-center text-xs text-loom-muted">
+                    images/ 文件夹中暂无图片。可点击「上传图片」直接放入，或把图片手动放进游戏的 images/ 目录。
+                  </div>
+                )}
+                {otherImages.map((img) => (
+                  <TargetCard
+                    key={img.path}
+                    selected={isOtherSelected(img.name)}
+                    label={img.name}
+                    onClick={() => onSelect({ kind: 'other', name: img.name })}
+                  >
+                    <CgThumb projectPath={projectPath} path={img.path} />
+                  </TargetCard>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* 底部按钮 */}
+        <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-loom-border">
+          <button
+            onClick={onClose}
+            className="px-3 py-1 text-xs rounded bg-loom-panel2 border border-loom-border text-loom-muted hover:text-loom-text transition-colors"
+          >
+            取消
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// 目标网格卡片：缩略图 + 名称，选中高亮
+function TargetCard({
+  selected,
+  label,
+  onClick,
+  children,
+}: {
+  selected: boolean
+  label: string
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={[
+        'flex flex-col items-center gap-1 p-2 rounded border transition-colors',
+        selected
+          ? 'border-loom-accent bg-loom-accent/10'
+          : 'border-loom-border bg-loom-bg hover:border-loom-accent/60',
+      ].join(' ')}
+    >
+      {children}
+      <span
+        className={[
+          'w-full text-center truncate text-[10px]',
+          selected ? 'text-loom-accent font-semibold' : 'text-loom-muted',
+        ].join(' ')}
+        title={label}
+      >
+        {label}
+      </span>
+    </button>
+  )
+}
+
+// CG 缩略图：无路径时显示占位图标
+function CgThumb({ projectPath, path }: { projectPath: string; path: string }) {
+  const imgUrl = useProjectImage(projectPath, path || null)
+  if (imgUrl) {
+    return (
+      <div className="w-10 h-10 rounded overflow-hidden border border-loom-border flex-shrink-0">
+        <img src={imgUrl} alt={path} className="w-full h-full object-cover" />
+      </div>
+    )
+  }
+  return (
+    <div className="w-10 h-10 rounded overflow-hidden flex items-center justify-center flex-shrink-0 bg-[#6b6358]/20">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#6b6358" strokeWidth="2" width="18" height="18">
+        <rect x="3" y="4" width="18" height="16" rx="2" />
+        <circle cx="9" cy="9" r="1.5" />
+        <path d="M21 15.5l-4.5-4.5L8 19" />
+      </svg>
+    </div>
+  )
+}
+
 function ShowBlock({ block }: { block: DialogueBlock }) {
-  const character = useStore((s) => s.characters).find((c) => c.varName === block.showCharVar)
+  const characters = useStore((s) => s.characters)
+  const character = characters.find((c) => c.varName === block.showCharVar)
+  const isCg = block.showKind === 'cg'
+  // 其他：images/ 下的任意图片（如背景图等），由 classifyShowBlocks 依据 images/ 列表确定性分类
+  const isOther = block.showKind === 'other'
+  if (isCg) {
+    const name = [block.showImage, block.showCharVar, block.showSprite].filter(Boolean).join(' ')
+    return (
+      <div className="flex items-center gap-3 py-2 px-4 my-1 rounded-lg bg-loom-panel border border-loom-border">
+        <div className="w-8 h-8 rounded-lg overflow-hidden flex items-center justify-center flex-shrink-0 bg-[#6b6358]/20">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#6b6358" strokeWidth="2" width="18" height="18">
+            <rect x="3" y="4" width="18" height="16" rx="2" />
+            <circle cx="9" cy="9" r="1.5" />
+            <path d="M21 15.5l-4.5-4.5L8 19" />
+          </svg>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-loom-accent">展示CG</span>
+            <span className="text-[10px] text-loom-muted/50 font-mono">L{block.line}</span>
+          </div>
+          <div className="text-sm text-loom-text font-mono truncate">{name}</div>
+        </div>
+      </div>
+    )
+  }
+  if (isOther) {
+    const name = [block.showImage, block.showCharVar, block.showSprite].filter(Boolean).join(' ')
+    return (
+      <div className="flex items-center gap-3 py-2 px-4 my-1 rounded-lg bg-loom-panel border border-loom-border">
+        <div className="w-8 h-8 rounded-lg overflow-hidden flex items-center justify-center flex-shrink-0 bg-[#6b6358]/20">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#6b6358" strokeWidth="2" width="18" height="18">
+            <rect x="3" y="4" width="18" height="16" rx="2" />
+            <circle cx="9" cy="9" r="1.5" />
+            <path d="M21 15.5l-4.5-4.5L8 19" />
+          </svg>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-loom-accent">展示图片</span>
+            <span className="text-[10px] text-loom-muted/50 font-mono">L{block.line}</span>
+          </div>
+          <div className="text-sm text-loom-text font-mono truncate">{name}</div>
+        </div>
+      </div>
+    )
+  }
   return (
     <div className="flex items-center gap-3 py-2 px-4 my-1 rounded-lg bg-loom-panel border border-loom-border">
       <Avatar
@@ -1648,7 +2137,53 @@ function ShowBlock({ block }: { block: DialogueBlock }) {
 }
 
 function HideBlock({ block }: { block: DialogueBlock }) {
-  const character = useStore((s) => s.characters).find((c) => c.varName === block.showCharVar)
+  const characters = useStore((s) => s.characters)
+  const character = characters.find((c) => c.varName === block.showCharVar)
+  const isCg = block.showKind === 'cg'
+  // 其他：images/ 下的任意图片（如背景图等），由 classifyShowBlocks 依据 images/ 列表确定性分类
+  const isOther = block.showKind === 'other'
+  if (isCg) {
+    const name = [block.showImage, block.showCharVar, block.showSprite].filter(Boolean).join(' ')
+    return (
+      <div className="flex items-center gap-3 py-2 px-4 my-1 rounded-lg bg-loom-panel border border-loom-border opacity-80">
+        <div className="w-8 h-8 rounded-lg overflow-hidden flex items-center justify-center flex-shrink-0 bg-[#6b6358]/20">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#6b6358" strokeWidth="2" width="18" height="18">
+            <rect x="3" y="4" width="18" height="16" rx="2" />
+            <circle cx="9" cy="9" r="1.5" />
+            <path d="M21 15.5l-4.5-4.5L8 19" />
+          </svg>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-loom-muted">隐藏CG</span>
+            <span className="text-[10px] text-loom-muted/50 font-mono">L{block.line}</span>
+          </div>
+          <div className="text-sm text-loom-muted font-mono truncate">{name}</div>
+        </div>
+      </div>
+    )
+  }
+  if (isOther) {
+    const name = [block.showImage, block.showCharVar, block.showSprite].filter(Boolean).join(' ')
+    return (
+      <div className="flex items-center gap-3 py-2 px-4 my-1 rounded-lg bg-loom-panel border border-loom-border opacity-80">
+        <div className="w-8 h-8 rounded-lg overflow-hidden flex items-center justify-center flex-shrink-0 bg-[#6b6358]/20">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#6b6358" strokeWidth="2" width="18" height="18">
+            <rect x="3" y="4" width="18" height="16" rx="2" />
+            <circle cx="9" cy="9" r="1.5" />
+            <path d="M21 15.5l-4.5-4.5L8 19" />
+          </svg>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-loom-muted">隐藏图片</span>
+            <span className="text-[10px] text-loom-muted/50 font-mono">L{block.line}</span>
+          </div>
+          <div className="text-sm text-loom-muted font-mono truncate">{name}</div>
+        </div>
+      </div>
+    )
+  }
   return (
     <div className="flex items-center gap-3 py-2 px-4 my-1 rounded-lg bg-loom-panel border border-loom-border opacity-80">
       <Avatar

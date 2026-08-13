@@ -55,6 +55,8 @@ interface PluginsState {
   pushToast: (message: string, type?: ToastItem['type']) => void
   removeToast: (id: number) => void
   emitHook: (event: string, payload?: unknown) => void
+  /** 组件级钩子订阅（如 UI 监听 app:saved 刷新画廊 CG 列表）；返回取消订阅函数 */
+  onHook: (event: string, fn: (payload: unknown) => void) => () => void
 }
 
 let toastSeq = 0
@@ -155,6 +157,12 @@ function buildLoomApi(
         if (!p) return []
         return window.pupurin.listFiles(p.path, subDir)
       },
+      readImage: async (subPath: string): Promise<string> => {
+        // game/ 相对路径 → data URL（画廊缩略图等预览用）
+        const p = getProject()
+        if (!p) return ''
+        return window.pupurin.readImageBase64(p.path, subPath)
+      },
     },
     settings: {
       get: async (key: string): Promise<unknown> => {
@@ -174,11 +182,20 @@ function buildLoomApi(
       write: (subPath: string, content: string): Promise<void> => {
         const p = getProject()
         if (!p) throw new Error('未打开项目')
-        return window.pupurin.pluginFsWrite(p.path, subPath, content)
+        return window.pupurin.pluginFsWrite(p.path, subPath, content).then(() => {
+          // 广播文件已保存，供 UI（如图形编辑器的画廊 CG 列表）刷新
+          getStore().emitHook('app:saved', { file: subPath, projectPath: p.path })
+        })
       },
       list: (subDir = ''): Promise<Array<{ name: string; isDir: boolean; path: string }>> => {
         const p = getProject()
         return p ? window.pupurin.pluginFsList(p.path, subDir) : Promise.resolve([])
+      },
+      uploadImage: async (): Promise<{ path: string; name: string; cancelled: boolean }> => {
+        // 打开系统选择框，把图片复制到项目 game/gallery/ 并返回 game/ 相对路径
+        const p = getProject()
+        if (!p) throw new Error('未打开项目')
+        return window.pupurin.pluginFsUploadImage(p.path)
       },
     },
     http: {
@@ -298,5 +315,11 @@ export const usePlugins = create<PluginsState>((set, get) => ({
         get().pushToast(`钩子 ${event} 执行失败：${String(e)}`, 'error')
       }
     }
+  },
+
+  onHook: (event, fn) => {
+    const entry = { pluginId: 'ui', event, fn: fn as (payload: unknown) => void | Promise<void> }
+    set((s) => ({ hooks: [...s.hooks, entry] }))
+    return () => set((s) => ({ hooks: s.hooks.filter((h) => h !== entry) }))
   },
 }))

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useStore, type ViewId } from './store/useStore'
 import { usePreferences } from './store/preferences'
 import { usePlugins } from './store/plugins'
@@ -16,6 +16,7 @@ import VariablePage from './pages/VariablePage'
 import ResourceManager from './pages/ResourceManager'
 import PackagePage from './pages/PackagePage'
 import PluginsPage from './pages/PluginsPage'
+import UiDesignerPage from './pages/UiDesignerPage'
 import ProjectPicker from './pages/ProjectPicker'
 import ToastHost from './components/ToastHost'
 import SearchDialog from './components/SearchDialog'
@@ -31,6 +32,7 @@ const PAGE_TITLES: Record<ViewId, string> = {
   package: '打包',
   resources: '资源管理器',
   plugins: '插件',
+  ui: 'UI 设计器',
 }
 
 // IDE 主界面（选中项目后渲染）。用 key={project.id} 强制 remount，切项目时彻底重置。
@@ -39,7 +41,7 @@ function Ide({ projectPath }: { projectPath: string }) {
   const setActiveView = useStore((s) => s.setActiveView)
   const currentProject = useStore((s) => s.currentProject)
   const setCurrentProject = useStore((s) => s.setCurrentProject)
-  const [isFullscreen, setIsFullscreen] = useState(false)
+  const isFullscreen = useStore((s) => s.isFullscreen)
 
   const setParse = useStore((s) => s.setParse)
   const setSource = useStore((s) => s.setSource)
@@ -119,7 +121,6 @@ function Ide({ projectPath }: { projectPath: string }) {
   }
 
   useEffect(() => {
-    const cleanup = window.pupurin.onFullscreenChange(setIsFullscreen)
     void (async () => {
       try {
         const st = await window.pupurin.getBackendStatus()
@@ -134,7 +135,6 @@ function Ide({ projectPath }: { projectPath: string }) {
         setError('ws: ' + String(e))
       }
     })()
-    return cleanup
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -163,7 +163,49 @@ function Ide({ projectPath }: { projectPath: string }) {
     return () => window.removeEventListener('keydown', handler)
   }, [])
 
-  // 非全屏时给 macOS 红绿灯留出空间（左侧约 80px）
+  // macOS 系统菜单栏：动作分发 + 视图菜单 radio 同步
+  // 用 ref 持有最新处理器，避免因闭包 state（source/saving…）频繁重注册
+  const menuHandlerRef = useRef<(action: { id: string }) => void>(() => {})
+  menuHandlerRef.current = ({ id }: { id: string }): void => {
+    switch (id) {
+      case 'backToProjects':
+        setCurrentProject(null)
+        break
+      case 'save':
+        void saveScriptFile()
+        break
+      case 'showInFinder':
+        if (currentProject) void window.pupurin.showProjectInFinder(currentProject.path)
+        break
+      case 'runGame':
+        void runGame()
+        break
+      case 'reparse':
+        void loadAll()
+        break
+      case 'toggleTheme': {
+        const m = usePreferences.getState().mode
+        usePreferences.getState().setMode(m === 'dark' ? 'light' : 'dark')
+        break
+      }
+      case 'openPluginsDir':
+        void window.pupurin.openPluginsDir()
+        break
+      case 'openStore':
+        setActiveView('plugins')
+        useStore.getState().bumpStoreTab()
+        break
+      default:
+        if (id.startsWith('view:')) setActiveView(id.slice(5) as ViewId)
+    }
+  }
+  useEffect(() => {
+    window.pupurin.setMenuView(activeView)
+    return window.pupurin.onMenuAction((action) => menuHandlerRef.current(action))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeView])
+
+  // 非全屏时给 macOS 红绿灯留出空间；全屏时红绿灯隐藏，LOGO 靠左（状态在 useStore 中跨页面共享）
   const headerPad = isFullscreen ? 'px-3' : 'pl-[80px] pr-3'
 
   return (
@@ -269,7 +311,8 @@ function Ide({ projectPath }: { projectPath: string }) {
                 ['variables', <VariablePage key="variables" />],
                 ['resources', <ResourceManager key="resources" />],
                 ['package', <PackagePage key="package" />],
-                ['plugins', <PluginsPage key="plugins" />]
+                ['plugins', <PluginsPage key="plugins" />],
+                ['ui', <UiDesignerPage key="ui" />]
               ] as const
             ).map(([id, el]) => {
               const active = activeView === id
@@ -309,6 +352,19 @@ export default function App() {
   // 功能栏偏好（插件面板加入/不加入）
   useEffect(() => {
     void useSidebarPrefs.getState().load()
+  }, [])
+
+  // 窗口全屏状态：初始查询真实状态 + 订阅变化 → 写入 useStore（切换页面/组件重挂载不丢失）
+  useEffect(() => {
+    let disposed = false
+    void window.pupurin.getIsFullscreen().then((v) => {
+      if (!disposed) useStore.getState().setIsFullscreen(v)
+    })
+    const off = window.pupurin.onFullscreenChange((v) => useStore.getState().setIsFullscreen(v))
+    return () => {
+      disposed = true
+      off()
+    }
   }, [])
 
   // 未选项目 → ProjectPicker；选中 → IDE（key 强制 remount）

@@ -30,6 +30,7 @@ mac:
     - target: dmg
     - target: zip
   category: public.app-category.developer-tools
+  # 标准 icns（按 PupurinLoom_icon.icon 设计合成：白→浅橙渐变 + LOGO）
   icon: build/icon.icns
   # 无 Apple Developer 证书时跳过签名（保持 ad-hoc 可用）
   identity: null
@@ -56,10 +57,15 @@ nsis:
 
 dmg:
   artifactName: "${productName}-${version}.${ext}"
+  # 安装引导背景：不显式指定 background，由 electron-builder 自动从 buildResourcesDir(build/) 探测
+  # background.tiff / background.png（@2x 自动适配 Retina），显式指定反而会按项目根目录解析导致找不到
+  window:
+    width: 660
+    height: 371
   contents:
-    - x: 130
-      y: 220
-    - x: 410
-      y: 220
+    - x: 165
+      y: 185
+    - x: 495
+      y: 185
       type: link
       path: /Applications

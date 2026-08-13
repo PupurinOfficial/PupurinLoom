@@ -110,15 +110,33 @@ export function serializeBlocks(blocks: DialogueBlock[]): string {
 
       case 'show': {
         const indent = extractIndent(block.raw)
-        const spritePart = block.showSprite ? ` ${block.showSprite}` : ''
-        lines.push(`${indent}show ${block.showCharVar}${spritePart}`)
+        const target =
+          (block.showKind === 'cg' || block.showKind === 'other') && block.showImage
+            ? block.showImage
+            : [block.showCharVar, block.showSprite].filter(Boolean).join(' ')
+        if (target.trim()) {
+          // other 不写 # loom: 标记（按 images/ 图片自动命名确定性分类）
+          const mark = block.showExplicit && block.showKind && block.showKind !== 'other' ? `  # loom:${block.showKind}` : ''
+          lines.push(`${indent}show ${target}${mark}`)
+        } else {
+          lines.push(block.raw)
+        }
         break
       }
 
       case 'hide': {
         const indent = extractIndent(block.raw)
-        const spritePart = block.showSprite ? ` ${block.showSprite}` : ''
-        lines.push(`${indent}hide ${block.showCharVar}${spritePart}`)
+        const target =
+          (block.showKind === 'cg' || block.showKind === 'other') && block.showImage
+            ? block.showImage
+            : [block.showCharVar, block.showSprite].filter(Boolean).join(' ')
+        if (target.trim()) {
+          // other 不写 # loom: 标记（按 images/ 图片自动命名确定性分类）
+          const mark = block.showExplicit && block.showKind && block.showKind !== 'other' ? `  # loom:${block.showKind}` : ''
+          lines.push(`${indent}hide ${target}${mark}`)
+        } else {
+          lines.push(block.raw)
+        }
         break
       }
 
@@ -237,13 +255,31 @@ function serializeBlocksWithIndent(blocks: DialogueBlock[], baseIndent: string):
         break
       }
       case 'show': {
-        const spritePart = block.showSprite ? ` ${block.showSprite}` : ''
-        lines.push(`${actualIndent}show ${block.showCharVar}${spritePart}`)
+        const target =
+          (block.showKind === 'cg' || block.showKind === 'other') && block.showImage
+            ? block.showImage
+            : [block.showCharVar, block.showSprite].filter(Boolean).join(' ')
+        if (target.trim()) {
+          // other 不写 # loom: 标记（按 images/ 图片自动命名确定性分类）
+          const mark = block.showExplicit && block.showKind && block.showKind !== 'other' ? `  # loom:${block.showKind}` : ''
+          lines.push(`${actualIndent}show ${target}${mark}`)
+        } else {
+          lines.push(block.raw)
+        }
         break
       }
       case 'hide': {
-        const spritePart = block.showSprite ? ` ${block.showSprite}` : ''
-        lines.push(`${actualIndent}hide ${block.showCharVar}${spritePart}`)
+        const target =
+          (block.showKind === 'cg' || block.showKind === 'other') && block.showImage
+            ? block.showImage
+            : [block.showCharVar, block.showSprite].filter(Boolean).join(' ')
+        if (target.trim()) {
+          // other 不写 # loom: 标记（按 images/ 图片自动命名确定性分类）
+          const mark = block.showExplicit && block.showKind && block.showKind !== 'other' ? `  # loom:${block.showKind}` : ''
+          lines.push(`${actualIndent}hide ${target}${mark}`)
+        } else {
+          lines.push(block.raw)
+        }
         break
       }
       case 'default': {
@@ -374,9 +410,9 @@ export function createBlock(type: DialogueBlock['type'], line: number): Dialogue
     case 'scene':
       return { ...base, background: 'background' }
     case 'show':
-      return { ...base, showCharVar: 'char', showSprite: 'normal' }
+      return { ...base, showKind: 'sprite', showCharVar: 'char', showSprite: 'normal', raw: 'show char normal' }
     case 'hide':
-      return { ...base, showCharVar: 'char', showSprite: 'normal' }
+      return { ...base, showKind: 'sprite', showCharVar: 'char', showSprite: 'normal', raw: 'hide char normal' }
     case 'default':
       return { ...base, varName: 'variable', varValue: '0' }
     case 'modify_var':

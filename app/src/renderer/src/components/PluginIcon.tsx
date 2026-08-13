@@ -51,6 +51,14 @@ const REGISTRY: Record<string, ReactNode> = {
       <path d="M12 12.5c-3 0-5 1.8-5 4 0 1.7 1.3 2.8 3 2.8 1.2 0 1.9-.6 2-.6s.8.6 2 .6c1.7 0 3-1.1 3-2.8 0-2.2-2-4-5-4z" />
     </>
   ),
+  // 画廊：相框 + 图片
+  'pupurin-gallery': (
+    <>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <circle cx="9" cy="9" r="1.5" />
+      <path d="M21 15.5l-4.5-4.5L8 19" />
+    </>
+  ),
   // 未言未语：对话气泡 + 引号
   'weiyan-weiyu': (
     <>

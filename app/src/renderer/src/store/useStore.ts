@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { LabelNode, FlowEdge, LogEntry, BackendStatus, ConsoleFilter, ProjectMeta, CharacterMeta, VariableMeta, StoryItem, SelectionState, EditorViewMode, VariableUsage, ProjectParseResult } from '../types'
 
-export type ViewId = 'home' | 'flowchart' | 'script' | 'characters' | 'variables' | 'package' | 'resources' | 'plugins'
+export type ViewId = 'home' | 'flowchart' | 'script' | 'characters' | 'variables' | 'package' | 'resources' | 'plugins' | 'ui'
 
 interface LoomState {
   labels: LabelNode[]
@@ -50,6 +50,12 @@ interface LoomState {
   sidebarFeature: string | null
   // 待选中的插件 id（功能栏右键「前往插件」→ 切到插件页并选中）
   pendingPluginId: string | null
+  // 切到插件商城 tab 的信号（菜单「帮助 → 插件商城」→ 插件页切到商城 tab）
+  pendingStoreTab: number
+  // images/ 图片列表刷新信号：上传/删除图片后 bump，令 useOtherImages 等重新扫描
+  imagesTick: number
+  // 窗口是否全屏（共享给各页面 header 决定是否给红绿灯留位）
+  isFullscreen: boolean
 
   setParse: (r: { labels: LabelNode[]; edges: FlowEdge[]; full_source: string; dialogue_chars: number }) => void
   setSource: (s: string) => void
@@ -83,6 +89,9 @@ interface LoomState {
   setPendingRevealFile: (f: { path: string } | null) => void
   setSearchNav: (n: { file: string; line: number; col: number; text: string; isStoryFile: boolean } | null) => void
   setPendingPluginId: (id: string | null) => void
+  bumpStoreTab: () => void
+  bumpImagesTick: () => void
+  setIsFullscreen: (v: boolean) => void
   openSidebar: (id: string) => void
   toggleSidebar: (id: string) => void
   closeSidebar: () => void
@@ -123,6 +132,9 @@ export const useStore = create<LoomState>((set) => ({
   searchNav: null,
   sidebarFeature: null,
   pendingPluginId: null,
+  pendingStoreTab: 0,
+  imagesTick: 0,
+  isFullscreen: false,
 
   setParse: (r) =>
     set({ labels: r.labels, edges: r.edges, source: r.full_source, dialogueChars: r.dialogue_chars }),
@@ -158,6 +170,9 @@ export const useStore = create<LoomState>((set) => ({
   setPendingRevealFile: (f) => set({ pendingRevealFile: f }),
   setSearchNav: (n) => set({ searchNav: n }),
   setPendingPluginId: (id) => set({ pendingPluginId: id }),
+  bumpStoreTab: () => set((st) => ({ pendingStoreTab: st.pendingStoreTab + 1 })),
+  bumpImagesTick: () => set((st) => ({ imagesTick: st.imagesTick + 1 })),
+  setIsFullscreen: (v) => set({ isFullscreen: v }),
   openSidebar: (id) => set({ sidebarFeature: id }),
   toggleSidebar: (id) => set((st) => ({ sidebarFeature: st.sidebarFeature === id ? null : id })),
   closeSidebar: () => set({ sidebarFeature: null }),

@@ -1,7 +1,8 @@
 import { app, shell, dialog, net, type BrowserWindow } from 'electron'
-import { join, dirname, resolve, sep } from 'node:path'
+import { join, dirname, resolve, sep, extname, basename } from 'node:path'
 import { promises as fs } from 'node:fs'
 import { spawn } from 'node:child_process'
+import { GALLERY_MANIFEST, galleryMain } from './builtinPlugins/gallery'
 
 // 插件系统（Phase 1：命令 + 面板视图）
 // 目录结构：userData/plugins/<id>/{manifest.json, main.js}
@@ -160,11 +161,6 @@ loom.commands.register('meow.options', 'options.rpy 行数（fs 演示）', func
   }).catch(function (e) { loom.toast('读取失败：' + e, 'error') })
 })
 
-// ---- 事件钩子：保存剧本后提醒 ----
-loom.hooks.on('app:saved', function (info) {
-  loom.toast('已保存喵～ ' + info.file)
-})
-
 // ---- 面板：全局喵语开关 + HTTP 演示 ----
 loom.panel.register('meow.preview', '喵语控制台', {
   render: function () {
@@ -233,7 +229,7 @@ async function ensureBuiltinPlugin(id: string, manifest: Record<string, unknown>
   await fs.writeFile(join(dir, 'main.js'), main, 'utf-8')
 }
 
-async function ensureExamplePlugin(): Promise<void> {
+async function ensureBuiltinPlugins(): Promise<void> {
   // 旧版示例插件 hello-loom（早期内置）升级时移除，避免残留
   try {
     const legacyManifest = JSON.parse(
@@ -246,13 +242,14 @@ async function ensureExamplePlugin(): Promise<void> {
     /* 不存在则无需处理 */
   }
   await ensureBuiltinPlugin('meow-loom', EXAMPLE_MANIFEST, EXAMPLE_MAIN)
+  await ensureBuiltinPlugin('pupurin-gallery', GALLERY_MANIFEST, galleryMain)
 }
 
 // ---- 扫描插件目录 ----
 export async function listPlugins(): Promise<PluginMeta[]> {
   const base = pluginsDir()
   await fs.mkdir(base, { recursive: true })
-  await ensureExamplePlugin()
+  await ensureBuiltinPlugins()
   const state = await readState()
 
   const entries = await fs.readdir(base, { withFileTypes: true })
@@ -499,6 +496,38 @@ export async function pluginFsList(
     isDir: e.isDirectory(),
     path: rel ? `${rel}/${e.name}` : e.name,
   }))
+}
+
+// 上传图片到项目 game/gallery/（画廊插件使用）；返回 game/ 相对路径
+export async function pluginFsUploadImage(
+  win: BrowserWindow | null,
+  projectPath: string
+): Promise<{ path: string; name: string; cancelled: boolean }> {
+  const opts: Electron.OpenDialogOptions = {
+    title: '选择要上传的图片',
+    properties: ['openFile'],
+    filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] }],
+  }
+  const result = win
+    ? await dialog.showOpenDialog(win, opts)
+    : await dialog.showOpenDialog(opts)
+  if (result.canceled || result.filePaths.length === 0) {
+    return { path: '', name: '', cancelled: true }
+  }
+  const src = result.filePaths[0]
+  const ext = extname(src).toLowerCase()
+  const base = basename(src, ext).replace(/[\\/:*?"<>|]/g, '_') || 'image'
+  const galleryDir = join(resolveInProject(projectPath, 'game'), 'gallery')
+  await fs.mkdir(galleryDir, { recursive: true })
+  let target = join(galleryDir, `${base}${ext}`)
+  let n = 1
+  while (await fs.access(target).then(() => true).catch(() => false)) {
+    target = join(galleryDir, `${base}_${n}${ext}`)
+    n++
+  }
+  await fs.copyFile(src, target)
+  const fileName = basename(target)
+  return { path: `gallery/${fileName}`, name: fileName, cancelled: false }
 }
 
 // HTTP：主进程代理请求（渲染层无 CORS 限制）

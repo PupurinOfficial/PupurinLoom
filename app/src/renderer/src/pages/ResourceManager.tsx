@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef, Fragment } from 'react'
 import { useStore } from '../store/useStore'
 import { useResourcePreview } from '../store/resourcePreview'
 import NonAsciiRenameDialog from '../components/NonAsciiRenameDialog'
+import PromptDialog from '../components/ui/PromptDialog'
 import type { NonAsciiRenameItem } from '../types'
 
 interface FileEntry {
@@ -68,7 +69,6 @@ export default function ResourceManager() {
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set())
 
   const [promptCfg, setPromptCfg] = useState<PromptConfig | null>(null)
-  const [promptValue, setPromptValue] = useState('')
   // 非 ASCII 文件名检查弹窗
   const [nonAsciiItems, setNonAsciiItems] = useState<NonAsciiRenameItem[] | null>(null)
   const [nonAsciiOpen, setNonAsciiOpen] = useState(false)
@@ -76,25 +76,12 @@ export default function ResourceManager() {
   const [nonAsciiCount, setNonAsciiCount] = useState(0)
 
   function openPrompt(cfg: PromptConfig): void {
-    setPromptValue(cfg.defaultValue)
     setPromptCfg(cfg)
-  }
-
-  async function confirmPrompt(): Promise<void> {
-    if (!promptCfg) return
-    const v = promptValue
-    const cfg = promptCfg
-    setPromptCfg(null)
-    setPromptValue('')
-    if (v.trim()) {
-      await cfg.onSubmit(v.trim())
-    }
   }
 
   function cancelPrompt(): void {
     if (promptCfg?.onCancel) promptCfg.onCancel()
     setPromptCfg(null)
-    setPromptValue('')
   }
 
   // 加载树根目录
@@ -550,7 +537,7 @@ export default function ResourceManager() {
       {/* 右侧：文件浏览器（放大预览覆盖此区域，左栏目录树保持可见） */}
       <div className="flex-1 min-w-0 flex flex-col relative">
         {/* 工具栏：面包屑 + 操作 */}
-        <div className="flex items-center gap-1 px-2 h-8 border-b border-loom-border bg-loom-panel2 text-xs">
+        <div className="flex items-center gap-1 px-2 h-10 border-b border-loom-border bg-loom-panel2 text-xs">
           <button
             onClick={() => { if (currentDir) void loadDir(currentDir.split('/').slice(0, -1).join('/')) }}
             disabled={!currentDir}
@@ -699,7 +686,7 @@ export default function ResourceManager() {
         {/* 放大预览（覆盖右区，保留左栏目录树） */}
         {zoomNode && (
           <div className="absolute inset-0 z-40 bg-loom-bg/95 flex flex-col">
-            <div className="flex items-center gap-2 px-3 h-9 bg-loom-panel2 border-b border-loom-border">
+            <div className="flex items-center gap-2 px-3 h-10 bg-loom-panel2 border-b border-loom-border">
               <span className="text-xs text-loom-accent font-mono truncate">{zoomNode.path}</span>
               <button
                 onClick={closeZoom}
@@ -796,42 +783,23 @@ export default function ResourceManager() {
         </div>
       )}
 
-      {/* 自定义 Prompt 模态框 */}
-      {promptCfg && (
-        <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50"
-          onClick={cancelPrompt}
-        >
-          <div
-            className="bg-loom-panel2 border border-loom-border rounded-lg shadow-xl w-80 p-4"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 className="text-sm font-semibold text-loom-text mb-3">{promptCfg.title}</h3>
-            <input
-              autoFocus
-              type="text"
-              value={promptValue}
-              onChange={(e) => setPromptValue(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') void confirmPrompt()
-                if (e.key === 'Escape') cancelPrompt()
-              }}
-              placeholder={promptCfg.placeholder}
-              className="w-full bg-loom-bg border border-loom-border rounded px-3 py-2 text-sm text-loom-text focus:outline-none focus:border-loom-accent font-mono"
-            />
-            <div className="flex justify-end gap-2 mt-4">
-              <button
-                onClick={cancelPrompt}
-                className="px-3 py-1 text-xs rounded bg-loom-panel border border-loom-border text-loom-muted hover:text-loom-text transition-colors"
-              >取消</button>
-              <button
-                onClick={() => void confirmPrompt()}
-                className="px-3 py-1 text-xs rounded bg-loom-accent text-loom-bg font-semibold hover:opacity-90 transition-opacity"
-              >确定</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* 统一输入弹窗（替代 window.prompt） */}
+      <PromptDialog
+        open={!!promptCfg}
+        title={promptCfg?.title ?? ''}
+        placeholder={promptCfg?.placeholder}
+        defaultValue={promptCfg?.defaultValue}
+        monospace
+        onConfirm={async (v) => {
+          const cfg = promptCfg
+          const t = v.trim()
+          if (t && cfg) {
+            setPromptCfg(null)
+            await cfg.onSubmit(t)
+          }
+        }}
+        onCancel={cancelPrompt}
+      />
 
       {/* 非 ASCII 文件名检查/修复弹窗 */}
       {nonAsciiOpen && nonAsciiItems && (

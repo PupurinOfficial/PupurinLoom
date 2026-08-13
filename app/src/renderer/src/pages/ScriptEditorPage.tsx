@@ -406,7 +406,7 @@ export default function ScriptEditorPage() {
       {/* 中间：编辑区 */}
       <div className="flex-1 min-w-0 flex flex-col">
         {/* 工具栏 */}
-        <div className="flex items-center gap-2 px-3 h-8 bg-loom-panel2 border-b border-loom-border text-xs">
+        <div className="flex items-center gap-2 px-3 h-10 bg-loom-panel2 border-b border-loom-border text-xs">
           <span className="text-loom-accent font-mono truncate max-w-[200px]">
             {currentFilePath}
           </span>

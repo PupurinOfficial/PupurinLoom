@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useStore } from '../store/useStore'
+import PageHeader from '../components/ui/PageHeader'
+import Button from '../components/ui/Button'
 import type { VariableMeta, VariableType } from '../types'
 
 // 验证 Python 变量名
@@ -199,41 +201,28 @@ export default function VariablesPage() {
 
   return (
     <div className="flex flex-col h-full">
-      {/* 标题栏 */}
-      <div className="flex items-center justify-between px-4 h-10 border-b border-loom-border bg-loom-panel2">
-        <h1 className="text-sm font-semibold text-loom-text">变量管理</h1>
-        <div className="flex items-center gap-2">
-          {error && (
-            <span className="text-xs text-loom-err px-2 py-0.5 rounded bg-loom-err/10">
-              {error}
-            </span>
-          )}
-          <button
-            onClick={() => void handleParseFromScript()}
-            className="px-2.5 py-1 text-[11px] rounded font-semibold bg-loom-panel border border-loom-border text-loom-text hover:bg-loom-panel2"
-          >
-            从脚本解析
-          </button>
-          <button
-            onClick={() => void handleAdd()}
-            className="px-2.5 py-1 text-[11px] rounded font-semibold bg-loom-accent text-loom-bg hover:opacity-90"
-          >
-            + 新增变量
-          </button>
-          <button
-            onClick={() => void handleSave()}
-            disabled={saving}
-            className={[
-              'px-2.5 py-1 text-[11px] rounded font-semibold transition-opacity',
-              saving
-                ? 'bg-loom-panel2 text-loom-muted cursor-wait'
-                : 'bg-loom-accent text-loom-bg hover:opacity-90',
-            ].join(' ')}
-          >
-            {saving ? '保存中…' : '保存'}
-          </button>
-        </div>
-      </div>
+      {/* 页头 */}
+      <PageHeader
+        title="变量管理"
+        actions={
+          <>
+            {error && (
+              <span className="text-xs text-loom-err px-2 py-0.5 rounded bg-loom-err/10">
+                {error}
+              </span>
+            )}
+            <Button variant="secondary" size="xs" onClick={() => void handleParseFromScript()}>
+              从脚本解析
+            </Button>
+            <Button variant="primary" size="xs" onClick={() => void handleAdd()}>
+              + 新增变量
+            </Button>
+            <Button variant="primary" size="xs" onClick={() => void handleSave()} loading={saving}>
+              {saving ? '保存中…' : '保存'}
+            </Button>
+          </>
+        }
+      />
 
       {/* 主内容 */}
       <div className="flex-1 p-6 overflow-auto">

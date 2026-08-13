@@ -3,6 +3,7 @@ import { useStore } from '../store/useStore'
 import type { CharacterMeta, SpriteMeta } from '../types'
 import { addImageDef, removeImageDef, updateImageDefPath, parseImageDefs } from '../utils/scriptImageSync'
 import CharacterAvatar, { lightenColor, SpriteThumbnail } from '../components/CharacterAvatar'
+import PromptDialog from '../components/ui/PromptDialog'
 
 // 内联 prompt 模态框配置（替代被 Electron 禁用的 window.prompt）
 interface PromptConfig {
@@ -23,31 +24,17 @@ export default function CharacterPage() {
   const [err, setErr] = useState<string | null>(null)
   const [dirty, setDirty] = useState(false)
   const [promptCfg, setPromptCfg] = useState<PromptConfig | null>(null)
-  const [promptValue, setPromptValue] = useState('')
 
   const projectPath = currentProject?.path ?? ''
 
   // 打开 prompt 模态框
   function openPrompt(cfg: PromptConfig): void {
-    setPromptValue(cfg.defaultValue)
     setPromptCfg(cfg)
-  }
-
-  // 确认提交
-  async function confirmPrompt(): Promise<void> {
-    if (!promptCfg) return
-    const v = promptValue
-    setPromptCfg(null)
-    setPromptValue('')
-    if (v.trim()) {
-      await promptCfg.onSubmit(v.trim())
-    }
   }
 
   // 取消
   function cancelPrompt(): void {
     setPromptCfg(null)
-    setPromptValue('')
   }
 
   // 加载角色数据
@@ -232,7 +219,7 @@ export default function CharacterPage() {
     <div className="flex h-full">
       {/* 左侧：角色列表 */}
       <aside className="w-56 flex flex-col bg-loom-panel border-r border-loom-border">
-        <div className="flex items-center justify-between px-3 py-2 border-b border-loom-border">
+        <div className="flex items-center justify-between px-3 h-8 bg-loom-panel2 border-b border-loom-border">
           <span className="text-xs font-semibold text-loom-text">角色列表</span>
           <button
             onClick={handleNew}
@@ -552,50 +539,21 @@ export default function CharacterPage() {
         )}
       </div>
 
-      {/* 内联 prompt 模态框（替代 window.prompt） */}
-      {promptCfg && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-          onClick={cancelPrompt}
-        >
-          <div
-            className="w-80 rounded-lg bg-loom-panel border border-loom-border shadow-xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="px-4 py-3 border-b border-loom-border">
-              <span className="text-sm font-semibold text-loom-text">{promptCfg.title}</span>
-            </div>
-            <div className="p-4">
-              <input
-                type="text"
-                value={promptValue}
-                onChange={(e) => setPromptValue(e.target.value)}
-                placeholder={promptCfg.placeholder}
-                autoFocus
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') void confirmPrompt()
-                  if (e.key === 'Escape') cancelPrompt()
-                }}
-                className="w-full bg-loom-bg border border-loom-border rounded px-3 py-2 text-sm focus:outline-none focus:border-loom-accent"
-              />
-            </div>
-            <div className="flex justify-end gap-2 px-4 py-3 border-t border-loom-border">
-              <button
-                onClick={cancelPrompt}
-                className="px-3 py-1 text-xs rounded text-loom-muted hover:text-loom-text transition-colors"
-              >
-                取消
-              </button>
-              <button
-                onClick={() => void confirmPrompt()}
-                className="px-3 py-1 text-xs rounded bg-loom-accent text-loom-bg font-semibold hover:opacity-90 transition-opacity"
-              >
-                确定
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* 统一输入弹窗（替代 window.prompt） */}
+      <PromptDialog
+        open={!!promptCfg}
+        title={promptCfg?.title ?? ''}
+        placeholder={promptCfg?.placeholder}
+        defaultValue={promptCfg?.defaultValue}
+        onConfirm={async (v) => {
+          const t = v.trim()
+          if (t && promptCfg) {
+            setPromptCfg(null)
+            await promptCfg.onSubmit(t)
+          }
+        }}
+        onCancel={cancelPrompt}
+      />
     </div>
   )
 }

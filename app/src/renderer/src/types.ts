@@ -252,6 +252,12 @@ declare global {
         ok: boolean; error?: string; code?: string
       }>
       onFullscreenChange: (cb: (isFullscreen: boolean) => void) => () => void
+      // 查询窗口当前是否全屏（组件重挂载时初始化红绿灯占位）
+      getIsFullscreen: () => Promise<boolean>
+      // macOS 系统菜单动作（返回取消订阅函数）
+      onMenuAction: (cb: (action: { id: string }) => void) => () => void
+      // 同步当前视图到「视图」菜单的 radio 勾选
+      setMenuView: (view: string) => void
       loadCharacters: (projectRoot: string) => Promise<CharacterMeta[]>
       saveCharacters: (projectRoot: string, characters: CharacterMeta[]) => Promise<void>
       newCharacter: (name: string) => Promise<CharacterMeta>
@@ -266,9 +272,11 @@ declare global {
       setStoryMark: (projectPath: string, filePath: string, mark: 'story' | 'code' | null) => Promise<void>
       readFile: (projectPath: string, subPath: string) => Promise<string>
       importFile: (projectPath: string, destSubDir: string, srcFilePath: string) => Promise<string>
+      importImages: (projectPath: string) => Promise<Array<{ path: string; name: string }>>
       pickFiles: () => Promise<string[]>
       pickAudioFiles: () => Promise<string[]>
       readImageBase64: (projectPath: string, subPath: string) => Promise<string>
+      writeImageBase64: (projectPath: string, subPath: string, dataUrl: string) => Promise<void>
       readAudioBase64: (projectPath: string, subPath: string) => Promise<string>
       listRpyFiles: (projectPath: string) => Promise<RpyFileNode[]>
       saveRpyFile: (projectPath: string, subPath: string, content: string) => Promise<void>
@@ -293,6 +301,7 @@ declare global {
       pluginFsRead: (projectPath: string, subPath: string) => Promise<string | null>
       pluginFsWrite: (projectPath: string, subPath: string, content: string) => Promise<void>
       pluginFsList: (projectPath: string, subDir: string) => Promise<Array<{ name: string; isDir: boolean; path: string }>>
+      pluginFsUploadImage: (projectPath: string) => Promise<{ path: string; name: string; cancelled: boolean }>
       pluginHttp: (method: string, url: string, body?: string, headers?: Record<string, string>) => Promise<{ ok: boolean; status: number; text: string }>
       pluginExec: (command: string) => Promise<{ code: number | null; stdout: string; stderr: string }>
       // 插件商城（链路验证）

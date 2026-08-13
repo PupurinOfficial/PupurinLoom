@@ -5,6 +5,8 @@ import { useStore } from '../store/useStore'
 import PluginPanelView from '../components/PluginPanelView'
 import PluginIcon from '../components/PluginIcon'
 import CreatePluginDialog from '../components/CreatePluginDialog'
+import PageHeader from '../components/ui/PageHeader'
+import Button from '../components/ui/Button'
 import type { StorePlugin } from '../types'
 
 // 插件商城索引地址（官方索引仓库，PR 收录）
@@ -12,7 +14,20 @@ const STORE_INDEX_URL = 'https://raw.githubusercontent.com/PupurinOfficial/Loom-
 // 插件提交指南（PR 收录制，任何人都可贡献）
 const SUBMIT_URL = 'https://github.com/PupurinOfficial/Loom-PluginStore/blob/main/CONTRIBUTING.md'
 
-// 插件商城视图：拉取索引 → 插件卡片 → 一键安装（安装后默认未信任/未启用）
+// 语义化版本比较：a > b 返回正数，相等返回 0（按 x.y.z 逐段比较，1.10.0 > 1.9.0）
+function cmpVer(a: string, b: string): number {
+  const pa = String(a).split('.').map((n) => parseInt(n, 10) || 0)
+  const pb = String(b).split('.').map((n) => parseInt(n, 10) || 0)
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] ?? 0
+    const y = pb[i] ?? 0
+    if (x !== y) return x - y
+  }
+  return 0
+}
+
+// 插件商城视图：拉取索引 → 插件卡片 → 一键安装/更新
+// 更新判定：已安装的非内置插件，其版本低于商城索引版本 → 显示「更新」按钮（复用 storeInstall 覆盖安装）
 function StoreView({ refreshSignal = 0 }: { refreshSignal: number }) {
   const plugins = usePlugins((s) => s.plugins)
   const loadPlugins = usePlugins((s) => s.loadPlugins)
@@ -50,7 +65,7 @@ function StoreView({ refreshSignal = 0 }: { refreshSignal: number }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshSignal])
 
-  const installedIds = new Set(plugins.map((p) => p.id))
+  const installedById = new Map(plugins.map((p) => [p.id, p]))
 
   const install = async (entry: StorePlugin): Promise<void> => {
     setInstalling(entry.id)
@@ -58,7 +73,7 @@ function StoreView({ refreshSignal = 0 }: { refreshSignal: number }) {
     try {
       const r = await window.pupurin.storeInstall(entry)
       if (!r.ok) {
-        setError(`安装「${entry.name}」失败：${r.error ?? '未知错误'}`)
+        setError(`安装/更新「${entry.name}」失败：${r.error ?? '未知错误'}`)
         return
       }
       await loadPlugins({ force: true })
@@ -107,7 +122,11 @@ function StoreView({ refreshSignal = 0 }: { refreshSignal: number }) {
           </div>
         )}
         {items.map((p) => {
-          const done = installedIds.has(p.id)
+          const inst = installedById.get(p.id)
+          // 已安装且非内置、商店版本更高 → 可更新；内置插件版本跟随应用，不提供商店更新
+          const needsUpdate = !!inst && !inst.builtin && cmpVer(p.version, inst.version) > 0
+          const done = !!inst && !needsUpdate
+          const busy = installing === p.id
           return (
             <div
               key={p.id}
@@ -120,6 +139,14 @@ function StoreView({ refreshSignal = 0 }: { refreshSignal: number }) {
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-semibold">{p.name}</span>
                   <span className="text-xs text-loom-muted font-mono">v{p.version}</span>
+                  {inst && !needsUpdate && (
+                    <span className="text-[10px] text-loom-muted/70 font-mono">已装 v{inst.version}</span>
+                  )}
+                  {needsUpdate && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-loom-warn/15 text-loom-warn font-semibold">
+                      有新版本 v{p.version}（已装 v{inst!.version}）
+                    </span>
+                  )}
                   {p.author && <span className="text-xs text-loom-muted truncate">by {p.author}</span>}
                 </div>
                 {p.description && (
@@ -132,14 +159,14 @@ function StoreView({ refreshSignal = 0 }: { refreshSignal: number }) {
               </div>
               <button
                 onClick={() => void install(p)}
-                disabled={done || installing === p.id}
+                disabled={done || busy}
                 className={`px-3 py-1.5 rounded text-xs font-semibold transition-colors flex-shrink-0 disabled:opacity-60 ${
                   done
                     ? 'bg-loom-accent/10 text-loom-accent border border-loom-accent/40'
                     : 'bg-loom-accent text-loom-bg hover:opacity-90'
                 }`}
               >
-                {done ? '已安装' : installing === p.id ? '安装中…' : '安装'}
+                {busy ? (needsUpdate ? '更新中…' : '安装中…') : needsUpdate ? '更新' : done ? '已安装' : '安装'}
               </button>
             </div>
           )
@@ -166,6 +193,7 @@ export default function PluginsPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const sidebarPrefs = useSidebarPrefs()
   const pendingPluginId = useStore((s) => s.pendingPluginId)
+  const pendingStoreTab = useStore((s) => s.pendingStoreTab)
 
   useEffect(() => {
     void loadPlugins()
@@ -179,6 +207,11 @@ export default function PluginsPage() {
     }
   }, [pendingPluginId])
 
+  // 菜单「帮助 → 插件商城」→ 切到商城 tab
+  useEffect(() => {
+    if (pendingStoreTab > 0) setTab('store')
+  }, [pendingStoreTab])
+
   // 选中第一个插件（或当前选中的仍然存在）
   const selected = plugins.find((p) => p.id === selectedId) ?? plugins[0] ?? null
   const selCommands = selected ? commands.filter((c) => c.pluginId === selected.id) : []
@@ -187,60 +220,47 @@ export default function PluginsPage() {
   return (
     <div className="flex flex-col h-full bg-loom-bg">
       {/* 页头 */}
-      <div className="flex items-center px-4 py-2 border-b border-loom-border select-none flex-shrink-0">
-        <div className="flex items-center gap-1">
-          {(
-            [
-              ['local', '本地插件'],
-              ['store', '插件商城'],
-            ] as const
-          ).map(([k, label]) => (
-            <button
-              key={k}
-              onClick={() => setTab(k)}
-              className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
-                tab === k
-                  ? 'bg-loom-accent/10 text-loom-accent'
-                  : 'text-loom-muted hover:text-loom-text hover:bg-loom-panel2'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        <span className="ml-3 text-xs text-loom-muted/70">
-          {tab === 'local'
+      <PageHeader
+        tabs={[
+          { id: 'local', label: '本地插件' },
+          { id: 'store', label: '插件商城' },
+        ]}
+        activeTab={tab}
+        onTabChange={(k) => setTab(k as 'local' | 'store')}
+        hint={
+          tab === 'local'
             ? loading
               ? '加载中…'
               : `共 ${plugins.length} 个插件 · ${commands.length} 条命令 · ${panels.length} 个面板`
-            : '从 GitHub 安装插件'}
-        </span>
-        <div className="ml-auto flex items-center gap-2">
-          <button
-            onClick={() => setCreateOpen(true)}
-            className="px-3 py-1.5 rounded bg-loom-panel2 border border-loom-border text-xs hover:border-loom-accent/60 hover:text-loom-accent transition-colors"
-            title="从官方模板创建一个新插件"
-          >
-            创建插件
-          </button>
-          <button
-            onClick={() => {
-              if (tab === 'local') void loadPlugins({ force: true })
-              else setStoreRefresh((x) => x + 1)
-            }}
-            disabled={tab === 'local' && loading}
-            className="px-3 py-1.5 rounded bg-loom-panel2 border border-loom-border text-xs hover:bg-loom-border/30 transition-colors disabled:opacity-50"
-          >
-            刷新
-          </button>
-          <button
-            onClick={() => void window.pupurin.openPluginsDir()}
-            className="px-3 py-1.5 rounded bg-loom-accent text-loom-bg text-xs font-semibold hover:opacity-90 transition-opacity"
-          >
-            打开插件目录
-          </button>
-        </div>
-      </div>
+            : '从 GitHub 安装插件'
+        }
+        actions={
+          <>
+            <Button
+              variant="secondary"
+              size="xs"
+              onClick={() => setCreateOpen(true)}
+              title="从官方模板创建一个新插件"
+            >
+              创建插件
+            </Button>
+            <Button
+              variant="secondary"
+              size="xs"
+              onClick={() => {
+                if (tab === 'local') void loadPlugins({ force: true })
+                else setStoreRefresh((x) => x + 1)
+              }}
+              disabled={tab === 'local' && loading}
+            >
+              刷新
+            </Button>
+            <Button variant="primary" size="xs" onClick={() => void window.pupurin.openPluginsDir()}>
+              打开插件目录
+            </Button>
+          </>
+        }
+      />
 
       {tab === 'store' && <StoreView refreshSignal={storeRefresh} />}
 

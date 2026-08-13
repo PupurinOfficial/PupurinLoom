@@ -9,6 +9,7 @@ interface IconDef {
   id: ViewId
   name: string
   svg: JSX.Element
+  badge?: string
 }
 
 const icons: IconDef[] = [
@@ -71,6 +72,18 @@ const icons: IconDef[] = [
     )
   },
   {
+    id: 'ui',
+    name: 'UI 设计器',
+    badge: 'BETA',
+    svg: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="22" height="22">
+        <rect x="3" y="4" width="18" height="16" rx="2" />
+        <path d="M3 9h18M8 4v5" />
+        <path d="M6 13h2M10 13h2M6 16h4" />
+      </svg>
+    )
+  },
+  {
     id: 'plugins',
     name: '插件',
     svg: (
@@ -102,6 +115,14 @@ export default function ActivityBar({ active, onChange }: ActivityBarProps) {
               <span className="absolute left-0 top-1 bottom-1 w-[2px] bg-loom-accent rounded-r" />
             )}
             {ic.svg}
+            {ic.badge && (
+              <span
+                className="absolute top-0.5 right-0.5 text-[5px] font-bold leading-none px-[3px] py-[2px] rounded-sm bg-amber-500 text-white tracking-wider"
+                title={`${ic.name}（${ic.badge}）`}
+              >
+                {ic.badge}
+              </span>
+            )}
           </button>
         )
       })}

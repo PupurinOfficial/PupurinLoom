@@ -6,7 +6,7 @@ import type { ProjectMeta, UpdateCheckResult } from '../types'
 import logoUrl from '../assets/pupurin-logo.png'
 
 // 与 package.json version 保持一致（发版时同步更新）
-const APP_VERSION = '0.3.1'
+const APP_VERSION = '0.4.0'
 
 export default function ProjectPicker() {
   const projects = useStore((s) => s.projects)
@@ -18,7 +18,6 @@ export default function ProjectPicker() {
   const [defaultDir, setDefaultDir] = useState<string>('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
-  const [isFullscreen, setIsFullscreen] = useState(false)
   // 新建项目向导状态
   const [wizStep, setWizStep] = useState(1)
   const [wizTitle, setWizTitle] = useState('') // 游戏显示名
@@ -60,11 +59,11 @@ export default function ProjectPicker() {
   }
 
   useEffect(() => {
-    const cleanup = window.pupurin.onFullscreenChange(setIsFullscreen)
     void refresh()
-    return cleanup
-  }, [])
+  }, [refresh])
 
+  // 非全屏时给 macOS 红绿灯留出空间；全屏时红绿灯隐藏，LOGO 靠左（状态在 useStore 中共享）
+  const isFullscreen = useStore((s) => s.isFullscreen)
   const headerPad = isFullscreen ? 'px-4' : 'pl-[80px] pr-4'
 
   async function handleOpen(p: ProjectMeta): Promise<void> {
@@ -186,7 +185,7 @@ export default function ProjectPicker() {
         className={`relative z-10 flex items-center h-9 ${headerPad} bg-loom-bg/95 backdrop-blur border-b border-loom-border select-none`}
         style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
       >
-        <img src={logoUrl} alt="Pupurin° Loom" className="h-5 w-auto" />
+        <img src={logoUrl} alt="Pupurin° Loom" className="h-6 w-auto" />
         <span className="ml-2 text-sm font-semibold tracking-wide">铃言织机°</span>
         <span className="ml-1 text-xs text-loom-muted font-mono">Pupurin° Loom</span>
         <span className="ml-3 text-xs text-loom-muted/70 font-mono">项目选择</span>

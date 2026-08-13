@@ -6,6 +6,7 @@ import { useResourcePreview } from '../store/resourcePreview'
 import StoryProperties, { usePropsHeader } from './StoryProperties'
 import PluginPanelView from './PluginPanelView'
 import PluginIcon from './PluginIcon'
+import UiDesignerPanel from '../uiDesigner/UiDesignerPanel'
 
 // ---- 右侧「功能栏」----
 // 常驻一条小图标栏（所有页面可见），点击图标展开对应侧边栏（至多 1 个），再点收起。
@@ -180,10 +181,17 @@ export default function FunctionBar() {
       icon: iconDetail,
       render: () => <ResourceDetailView />,
     },
+    {
+      id: 'ui-designer',
+      title: 'UI 设计',
+      icon: <UiDesignIcon />,
+      render: () => <UiDesignerPanel />,
+    },
   ]
   const scopes: Record<string, ViewId[]> = {
     'script-props': ['script'],
     'resource-detail': ['resources'],
+    'ui-designer': ['ui'],
   }
   // 织机内属性面板仅故事文件显示（代码文件时隐藏图标并自动收起）
   const pageVisible = (id: string): boolean => {
@@ -324,6 +332,17 @@ function PropsIcon() {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="20" height="20">
       <rect x="3" y="4" width="18" height="16" rx="2" />
       <path d="M7 9h10M7 13h6M7 17h9" />
+    </svg>
+  )
+}
+
+// UI 设计图标（画布 + 光标，Figma 式拖拽布局）
+function UiDesignIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="20" height="20">
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M3 9h18M9 9v11" />
+      <path d="M14.5 13.5l3.2 4.1M17.5 18.5l1.8 1.8" />
     </svg>
   )
 }

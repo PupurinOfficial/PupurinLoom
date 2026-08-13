@@ -151,7 +151,7 @@ export default function VariablePage() {
     <div className="flex h-full">
       {/* 左侧：变量列表 */}
       <aside className="w-56 flex flex-col bg-loom-panel border-r border-loom-border">
-        <div className="flex items-center justify-between px-3 py-2 border-b border-loom-border">
+        <div className="flex items-center justify-between px-3 h-8 bg-loom-panel2 border-b border-loom-border">
           <span className="text-xs font-semibold text-loom-text">变量列表</span>
           <button
             onClick={handleNew}
