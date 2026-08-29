@@ -5,6 +5,10 @@ on:
     branches: [main]
     # 发版（打 v* tag）时自动重新构建站点，让「最新版本」徽标跟随 Releases 更新
     tags: ['v*']
+  # CI 通过 API 发布 Release 不会触发 tag push，这里单独监听 Release 发布事件，
+  # 保证「最新版本」徽标在发版后自动重建跟随
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:

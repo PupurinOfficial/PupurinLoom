@@ -5,7 +5,7 @@ export const site = {
   slogan: '以言为线，铃织成篇',
   description: '可视化 Ren\'Py 开发工具 · A Pupurin° Project · 仆仆铃°工作室',
   // 版本号：构建时由 CI 从 GitHub Releases 自动注入（PUBLIC_APP_VERSION），本地开发/构建失败时回退到写死值
-  version: import.meta.env.PUBLIC_APP_VERSION || '0.3.1',
+  version: import.meta.env.PUBLIC_APP_VERSION || '0.4.0',
   license: 'MIT License',
   // 图片素材：放入 public/images/ 后在此填写对应路径（以站点 base 开头），留空则隐藏图片位
   images: {
