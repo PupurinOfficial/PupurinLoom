@@ -109,24 +109,6 @@ export default function HomePage() {
           )}
         </Section>
 
-        {/* 最近活动 */}
-        <Section title="最近活动">
-          <ul className="space-y-1.5 text-sm text-loom-text/80">
-            <li className="flex items-center gap-2">
-              <span className="w-1.5 h-1.5 rounded-full bg-loom-accent" />
-              <span>DEMO 初始化完成，后端已就绪</span>
-            </li>
-            <li className="flex items-center gap-2">
-              <span className="w-1.5 h-1.5 rounded-full bg-loom-ok" />
-              <span>解析了 {labelCount} 个 label，{edges.length} 条跳转，{menuCount} 个选项</span>
-            </li>
-            <li className="flex items-center gap-2">
-              <span className="w-1.5 h-1.5 rounded-full bg-loom-muted" />
-              <span>等待更多操作…</span>
-            </li>
-          </ul>
-        </Section>
-
         {/* 品牌区 */}
         <div className="pt-4 pb-2 text-center space-y-1.5 select-none">
           <div className="text-xs text-loom-muted">

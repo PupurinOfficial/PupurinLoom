@@ -23,7 +23,6 @@ export default function VariablePage() {
 
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
-  const [dirty, setDirty] = useState(false)
   const [promptCfg, setPromptCfg] = useState<PromptConfig | null>(null)
   const [promptValue, setPromptValue] = useState('')
 
@@ -59,6 +58,7 @@ export default function VariablePage() {
     try {
       const list = await window.pupurin.loadVariables(projectPath)
       setVariables(list)
+      useStore.getState().setVariablesDirty(false)
       if (list.length > 0 && !list.find((v) => v.id === selectedVarId)) {
         setSelectedVarId(list[0].id)
       }
@@ -74,25 +74,10 @@ export default function VariablePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectPath])
 
-  // 保存
-  async function save(): Promise<void> {
-    if (!projectPath) return
-    setBusy(true)
-    setErr(null)
-    try {
-      await window.pupurin.saveVariables(projectPath, variables)
-      setDirty(false)
-    } catch (e) {
-      setErr(String(e))
-    } finally {
-      setBusy(false)
-    }
-  }
-
   // 更新单个变量
   function updateVar(id: string, patch: Partial<VariableMeta>): void {
     setVariables(variables.map((v) => (v.id === id ? { ...v, ...patch } : v)))
-    setDirty(true)
+    useStore.getState().setVariablesDirty(true)
   }
 
   // 新建变量
@@ -105,7 +90,7 @@ export default function VariablePage() {
         const v = await window.pupurin.newVariable(name)
         setVariables([...variables, v])
         setSelectedVarId(v.id)
-        setDirty(true)
+        useStore.getState().setVariablesDirty(true)
       }
     })
   }
@@ -118,7 +103,7 @@ export default function VariablePage() {
     if (selectedVarId === id) {
       setSelectedVarId(remaining[0]?.id ?? null)
     }
-    setDirty(true)
+    useStore.getState().setVariablesDirty(true)
   }
 
   // 从 script.rpy 解析变量
@@ -129,7 +114,7 @@ export default function VariablePage() {
     try {
       const list = await window.pupurin.parseVariablesFromScript(projectPath)
       setVariables(list)
-      setDirty(true)
+      useStore.getState().setVariablesDirty(true)
     } catch (e) {
       setErr(String(e))
     } finally {
@@ -204,16 +189,6 @@ export default function VariablePage() {
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-lg font-semibold">{selected.name}</h2>
               <div className="flex items-center gap-2">
-                {dirty && (
-                  <span className="text-[11px] text-loom-accent font-mono">● 未保存</span>
-                )}
-                <button
-                  onClick={save}
-                  disabled={busy || !dirty}
-                  className="px-3 py-1 text-xs rounded bg-loom-accent text-loom-bg font-semibold hover:opacity-90 disabled:opacity-40 transition-opacity"
-                >
-                  {busy ? '保存中…' : '保存'}
-                </button>
                 <button
                   onClick={() => handleDelete(selected.id, selected.name)}
                   className="px-3 py-1 text-xs rounded bg-loom-err/20 text-loom-err hover:bg-loom-err/30 transition-colors"

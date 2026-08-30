@@ -156,6 +156,16 @@ const api = {
     ipcRenderer.on('menu:action', handler)
     return () => ipcRenderer.removeListener('menu:action', handler)
   },
+  // 窗口关闭保护：主进程询问是否有未保存更改（返回 cleanup 函数）
+  onBeforeClose: (cb: () => void): (() => void) => {
+    const handler = (): void => cb()
+    ipcRenderer.on('app:before-close', handler)
+    return () => ipcRenderer.removeListener('app:before-close', handler)
+  },
+  // 确认后真正关闭窗口（保存/不保存均需调用）
+  confirmClose: (): Promise<void> => ipcRenderer.invoke('window:confirmClose'),
+  // 弹窗点「取消」：复位主进程退出流程状态（避免 Cmd+Q 取消后残留）
+  cancelClose: (): Promise<void> => ipcRenderer.invoke('window:cancelClose'),
   // 同步当前视图到「视图」菜单的 radio 勾选
   setMenuView: (view: string): void => ipcRenderer.send('menu:setView', view),
 

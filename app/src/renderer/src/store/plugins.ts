@@ -136,6 +136,8 @@ function buildLoomApi(
     },
     project: {
       getPath: (): string | null => getProject()?.path ?? null,
+      // 当前打开的文件（game/ 相对路径，如 script.rpy）
+      currentFile: (): string | null => useStore.getState().currentFilePath,
       readScript: async (): Promise<string | null> => {
         const p = getProject()
         if (!p) return null

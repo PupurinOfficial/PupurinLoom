@@ -66,6 +66,17 @@ const REGISTRY: Record<string, ReactNode> = {
       <path d="M8.5 10l-1.7 2.3h3.4L8.5 10zM15.5 10l-1.7 2.3h3.4L15.5 10z" fill="currentColor" stroke="none" />
     </>
   ),
+  // 多语言：语言/翻译（lucide languages 造型，文 A 意象）
+  'pupurin-i18n': (
+    <>
+      <path d="m5 8 6 6" />
+      <path d="m4 14 6-6 2-3" />
+      <path d="M2 5h12" />
+      <path d="M7 2h1" />
+      <path d="m22 22-5-10-5 10" />
+      <path d="M14 18h6" />
+    </>
+  ),
 }
 
 function RegistrySvg({ size, className, children }: { size: number; className: string; children: ReactNode }) {

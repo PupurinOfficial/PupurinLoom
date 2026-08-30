@@ -55,8 +55,27 @@ import {
 } from './pluginManager'
 import { fetchStoreIndex, installPluginFromStore, type StorePlugin } from './pluginStore'
 
+// 退出阶段兜底：stdout/stderr 管道已关闭时（write EIO）写日志会抛未捕获异常。
+// 这类错误是退出流程的无害噪声，静默忽略；其余错误仍打印（并避免 Electron 默认错误对话框）。
+process.on('uncaughtException', (err) => {
+  const e = err as NodeJS.ErrnoException
+  if (e && e.code === 'EIO') return
+  console.error('[uncaughtException]', err)
+})
+process.on('unhandledRejection', (reason) => {
+  const e = reason instanceof Error ? (reason as NodeJS.ErrnoException) : null
+  if (e && e.code === 'EIO') return
+  console.error('[unhandledRejection]', reason)
+})
+
 let mainWindow: BW | null = null
 const backendMgr = new BackendManager()
+// 关闭保护状态：forceClose 表示渲染层已确认（允许真正关闭）；
+// quitting 表示正处于 Cmd+Q 退出流程（确认后需继续退出应用，而非仅关窗口）
+let forceClose = false
+let quitting = false
+// 渲染层无响应时的强制关闭兜底定时器
+let closeRequestTimer: NodeJS.Timeout | null = null
 
 // 打包完成后发送系统通知（macOS 通知中心 / Windows 通知中心）
 function sendCompletionNotification(title: string, body: string): void {
@@ -234,6 +253,17 @@ async function bootstrap(): Promise<void> {
 }
 
 function createWindow(): void {
+  // 防重入：bootstrap 异步启动后端期间，activate 可能抢先创建了窗口，
+  // 此时不重复创建，直接聚焦已有窗口（否则会出现两个编辑器窗口）
+  const existing = BrowserWindow.getAllWindows()[0]
+  if (existing) {
+    mainWindow = existing
+    if (existing.isMinimized()) existing.restore()
+    existing.show()
+    existing.focus()
+    return
+  }
+
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 820,
@@ -263,6 +293,32 @@ function createWindow(): void {
     mainWindow = null
   })
 
+  // 关闭保护：
+  // - macOS 红绿灯（非退出流程）→ 隐藏窗口而非销毁，保留全部编辑状态，Dock 点开即还原
+  // - Cmd+Q（退出流程）/ Windows 点 X → 询问渲染层是否有未保存更改（确认后经 window:confirmClose 放行）
+  mainWindow.on('close', (e) => {
+    if (forceClose) return
+    // 渲染层已崩溃/销毁时直接放行，避免窗口永远关不掉
+    if (mainWindow?.webContents.isDestroyed() || mainWindow?.webContents.isCrashed()) return
+    e.preventDefault()
+    if (process.platform === 'darwin' && !quitting) {
+      mainWindow?.hide()
+      return
+    }
+    mainWindow?.webContents.send('app:before-close')
+    // 兜底：渲染层无响应（黑屏/加载失败/进程卡死）时 3 秒后强制放行，避免「无法退出」
+    if (closeRequestTimer) clearTimeout(closeRequestTimer)
+    closeRequestTimer = setTimeout(() => {
+      closeRequestTimer = null
+      if (forceClose) return
+      forceClose = true
+      for (const w of BrowserWindow.getAllWindows()) {
+        if (!w.isDestroyed()) w.destroy()
+      }
+      if (quitting) app.quit()
+    }, 3000)
+  })
+
   // 全屏状态变化通知渲染层（用于调整红绿灯区域的 padding）
   mainWindow.on('enter-full-screen', () => {
     mainWindow?.webContents.send('window:fullscreen', true)
@@ -274,6 +330,30 @@ function createWindow(): void {
   // macOS 系统菜单栏（自定义动作经 menu:action 派发给渲染层）
   buildApplicationMenu(mainWindow)
 }
+
+// 渲染层确认后的真正关闭入口：仅 Cmd+Q（退出流程）或 Windows 点 X 会走到这里，
+// 确认后关窗口并退出应用。遍历关闭所有 BrowserWindow（即使异常情况下存在多个窗口也能全部退出）
+ipcMain.handle('window:confirmClose', () => {
+  if (closeRequestTimer) {
+    clearTimeout(closeRequestTimer)
+    closeRequestTimer = null
+  }
+  forceClose = true
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (!w.isDestroyed()) w.destroy()
+  }
+  app.quit()
+})
+
+// 渲染层在弹窗中点了「取消」：复位退出流程状态（避免 Cmd+Q 取消后残留）
+ipcMain.handle('window:cancelClose', () => {
+  if (closeRequestTimer) {
+    clearTimeout(closeRequestTimer)
+    closeRequestTimer = null
+  }
+  quitting = false
+  forceClose = false
+})
 
 // 渲染层同步菜单：activeView 变化 → 更新「视图」菜单 radio 勾选
 ipcMain.on('menu:setView', (_e, view: string) => {
@@ -305,6 +385,21 @@ if (!app.isPackaged) {
   }
 }
 
+// 单实例锁：重复启动（Finder/双击 .app / 命令行再跑一次）时聚焦已有窗口，
+// 而不是启动第二个实例导致出现两个主窗口
+const gotSingleLock = app.requestSingleInstanceLock()
+if (!gotSingleLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.show()
+      mainWindow.focus()
+    }
+  })
+}
+
 app.whenReady().then(() => {
   void bootstrap()
   // 创建符号链接到 ~/Documents/Pupurin Loom Projects/
@@ -320,10 +415,33 @@ app.on('window-all-closed', () => {
 })
 
 app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  // macOS Dock 点击：优先聚焦已有窗口（可能被红绿灯隐藏），没有才创建
+  const win = BrowserWindow.getAllWindows()[0]
+  if (win) {
+    mainWindow = win
+    if (win.isMinimized()) win.restore()
+    win.show()
+    win.focus()
+  } else {
+    createWindow()
+  }
 })
 
-app.on('before-quit', () => backendMgr.stop())
+// 终端退出（关闭终端窗口，dev 模式下 app 是终端的子进程）时随之一并退出，
+// 避免 app 残留 Dock 图标、点开黑窗口无法退出
+process.on('SIGHUP', () => {
+  forceClose = true
+  if (closeRequestTimer) {
+    clearTimeout(closeRequestTimer)
+    closeRequestTimer = null
+  }
+  app.quit()
+})
+
+app.on('before-quit', () => {
+  quitting = true
+  backendMgr.stop()
+})
 
 // ---- IPC 暴露给渲染层 ----
 // 关键：每次请求端口/状态时先 ensureHealthy，自动检测并恢复僵尸后端

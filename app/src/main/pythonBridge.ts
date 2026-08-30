@@ -79,6 +79,10 @@ export interface BackendHandle {
 }
 
 // 启动单个后端进程（不包含重启逻辑）
+// 退出中标志：stop() 之后子进程的 data/exit/error 回调不再输出日志
+// （退出阶段主进程 stdout/stderr 管道可能已关闭，写入会抛 write EIO）
+let stopping = false
+
 async function spawnBackend(): Promise<BackendHandle> {
   const port = await getFreePort()
   const pyDir = resolvePythonDir()
@@ -108,16 +112,16 @@ async function spawnBackend(): Promise<BackendHandle> {
   })
 
   proc.stdout?.on('data', (d: Buffer) => {
-    console.log('[py:out]', d.toString().trimEnd())
+    if (!stopping) console.log('[py:out]', d.toString().trimEnd())
   })
   proc.stderr?.on('data', (d: Buffer) => {
-    console.error('[py:err]', d.toString().trimEnd())
+    if (!stopping) console.error('[py:err]', d.toString().trimEnd())
   })
   proc.on('exit', (code) => {
-    console.log(`[py] exited with code ${code}`)
+    if (!stopping) console.log(`[py] exited with code ${code}`)
   })
   proc.on('error', (err) => {
-    console.error('[py] spawn error:', err)
+    if (!stopping) console.error('[py] spawn error:', err)
   })
 
   await waitForHealth(port)
@@ -217,6 +221,7 @@ export class BackendManager {
   }
 
   stop(): void {
+    stopping = true
     if (this.healthTimer) {
       clearInterval(this.healthTimer)
       this.healthTimer = null

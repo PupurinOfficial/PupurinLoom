@@ -3,6 +3,7 @@ import { join, dirname, resolve, sep, extname, basename } from 'node:path'
 import { promises as fs } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { GALLERY_MANIFEST, galleryMain } from './builtinPlugins/gallery'
+import { I18N_MANIFEST, i18nMain } from './builtinPlugins/i18n'
 
 // 插件系统（Phase 1：命令 + 面板视图）
 // 目录结构：userData/plugins/<id>/{manifest.json, main.js}
@@ -217,8 +218,10 @@ async function ensureBuiltinPlugin(id: string, manifest: Record<string, unknown>
   const targetVersion = String(manifest.version)
   try {
     const existing = JSON.parse(await fs.readFile(join(dir, 'manifest.json'), 'utf-8'))
-    // 内置插件代码升级：版本不一致时覆盖，保证用户看到最新实现
+    // 内置插件：main.js 与源码内联版本以「内容+版本」双重校验。
+    // 版本一致时也强制重写 main.js，保证开发迭代中用户目录始终是最新实现
     if (existing.builtin === true && String(existing.version) === targetVersion) {
+      await fs.writeFile(join(dir, 'main.js'), main, 'utf-8')
       return
     }
   } catch {
@@ -243,6 +246,7 @@ async function ensureBuiltinPlugins(): Promise<void> {
   }
   await ensureBuiltinPlugin('meow-loom', EXAMPLE_MANIFEST, EXAMPLE_MAIN)
   await ensureBuiltinPlugin('pupurin-gallery', GALLERY_MANIFEST, galleryMain)
+  await ensureBuiltinPlugin('pupurin-i18n', I18N_MANIFEST, i18nMain)
 }
 
 // ---- 扫描插件目录 ----
@@ -481,7 +485,11 @@ export async function pluginFsRead(projectPath: string, subPath: string): Promis
 }
 
 export async function pluginFsWrite(projectPath: string, subPath: string, content: string): Promise<void> {
-  await fs.writeFile(resolveInProject(projectPath, subPath), content, 'utf-8')
+  const target = resolveInProject(projectPath, subPath)
+  // 自动创建父目录，支持写入 game/tl/<语言>/ 等嵌套路径
+  await fs.mkdir(dirname(target), { recursive: true })
+  await fs.writeFile(target, content, 'utf-8')
+  console.log('[pluginFsWrite]', target, 'bytes=' + Buffer.byteLength(content, 'utf-8'))
 }
 
 export async function pluginFsList(

@@ -256,6 +256,12 @@ declare global {
       getIsFullscreen: () => Promise<boolean>
       // macOS 系统菜单动作（返回取消订阅函数）
       onMenuAction: (cb: (action: { id: string }) => void) => () => void
+      // 窗口关闭保护：主进程询问是否有未保存更改（返回取消订阅函数）
+      onBeforeClose: (cb: () => void) => () => void
+      // 确认后真正关闭窗口（保存/不保存均需调用）
+      confirmClose: () => Promise<void>
+      // 弹窗点「取消」：复位主进程退出流程状态（避免 Cmd+Q 取消后残留）
+      cancelClose: () => Promise<void>
       // 同步当前视图到「视图」菜单的 radio 勾选
       setMenuView: (view: string) => void
       loadCharacters: (projectRoot: string) => Promise<CharacterMeta[]>

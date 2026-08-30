@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import Editor from '@monaco-editor/react'
 import { useStore } from '../store/useStore'
+import { usePlugins } from '../store/plugins'
 import { usePreferences } from '../store/preferences'
 import { beforeMount as registerRenpy } from '../monaco-renpy'
 import DialogueView from '../components/DialogueView'
@@ -38,6 +39,11 @@ export default function ScriptEditorPage() {
   const setSearchNav = useStore((s) => s.setSearchNav)
 
   const [rpyFiles, setRpyFiles] = useState<RpyFileNode[]>([])
+
+  // 织机切换文件时通知插件（如多语言面板跟随当前文件刷新）
+  const emitFileOpened = useCallback((file: string) => {
+    usePlugins.getState().emitHook('app:fileOpened', { file })
+  }, [])
   const [currentIsStory, setCurrentIsStory] = useState(true)
   const [loading, setLoading] = useState(false)
   // 新建章节弹窗
@@ -85,6 +91,7 @@ export default function ScriptEditorPage() {
         const content = await window.pupurin.readFile(projectPath, node.path)
         setSource(content)
         setCurrentFilePath(node.path)
+        emitFileOpened(node.path)
         setSourceModified(false)
         setCurrentIsStory(node.isStoryFile)
         useStore.getState().setIsStoryFile(node.isStoryFile)
@@ -164,6 +171,7 @@ export default function ScriptEditorPage() {
           const content = await window.pupurin.readFile(projectPath, nav.file)
           setSource(content)
           setCurrentFilePath(nav.file)
+          emitFileOpened(nav.file)
           setSourceModified(false)
           setCurrentIsStory(nav.isStoryFile)
           if (nav.isStoryFile) {
@@ -204,6 +212,7 @@ export default function ScriptEditorPage() {
           const content = await window.pupurin.readFile(projectPath, file)
           setSource(content)
           setCurrentFilePath(file)
+          emitFileOpened(file)
           setSourceModified(false)
           setCurrentIsStory(true)
           const r = await parseSource(content)

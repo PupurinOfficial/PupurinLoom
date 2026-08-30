@@ -122,26 +122,6 @@ export default function UiDesignerPage() {
             </>
           )}
         </div>
-        <div className="ml-auto flex items-center gap-3">
-          {s.modified && (
-            <span className="text-[11px] text-loom-accent flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-loom-accent" />
-              未保存
-            </span>
-          )}
-          <button
-            onClick={() => void s.save()}
-            disabled={!s.modified || s.saving}
-            className={[
-              'px-3 py-1.5 text-[12px] rounded font-semibold transition-opacity',
-              s.modified && !s.saving
-                ? 'bg-loom-accent text-loom-bg hover:opacity-90'
-                : 'bg-loom-panel2 text-loom-muted cursor-not-allowed',
-            ].join(' ')}
-          >
-            {s.saving ? '保存中…' : '保存到项目'}
-          </button>
-        </div>
       </div>
       {s.error && (
         <div className="px-4 py-1.5 text-[11px] text-loom-err bg-loom-err/10 border-b border-loom-border">

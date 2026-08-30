@@ -20,6 +20,7 @@ import UiDesignerPage from './pages/UiDesignerPage'
 import ProjectPicker from './pages/ProjectPicker'
 import ToastHost from './components/ToastHost'
 import SearchDialog from './components/SearchDialog'
+import { useUiDesigner } from './uiDesigner/uiDesignerStore'
 import type { LogEntry } from './types'
 import logoUrl from './assets/pupurin-logo.png'
 
@@ -48,7 +49,10 @@ function Ide({ projectPath }: { projectPath: string }) {
   const setSourceModified = useStore((s) => s.setSourceModified)
   const setProjectParse = useStore((s) => s.setProjectParse)
   const setVariableUsages = useStore((s) => s.setVariableUsages)
-  const sourceModified = useStore((s) => s.sourceModified)
+  // 项目级脏状态：任一模块（剧本/角色/变量/UI 设计器）有未保存改动即显示红点
+  const isProjectDirty = useStore(
+    (s) => s.sourceModified || s.charactersDirty || s.variablesDirty || s.uiDirty
+  )
   const source = useStore((s) => s.source)
   const currentFilePath = useStore((s) => s.currentFilePath)
   const addLog = useStore((s) => s.addLog)
@@ -61,6 +65,10 @@ function Ide({ projectPath }: { projectPath: string }) {
   const [runError, setRunError] = useState<string | null>(null)
   const [showSettings, setShowSettings] = useState(false)
   const [showSearch, setShowSearch] = useState(false)
+  // 未保存确认弹窗：'close' = 关窗口 / 'back' = 返回项目列表
+  const [closePrompt, setClosePrompt] = useState<'close' | 'back' | null>(null)
+  // 防重入：弹窗已打开时忽略重复的关闭/返回请求
+  const closingRef = useRef(false)
 
   async function loadAll(): Promise<void> {
     setLoading(true)
@@ -88,24 +96,95 @@ function Ide({ projectPath }: { projectPath: string }) {
     }
   }
 
-  async function saveScriptFile(): Promise<void> {
-    if (!sourceModified || saving) return
+  // 进行中的保存任务（防并发：⌘S 与「保存并关闭」同时触发时共用同一 Promise）
+  const savePromiseRef = useRef<Promise<boolean> | null>(null)
+
+  // 统一保存入口：顶栏按钮 / ⌘S / 菜单「保存」都走这里，
+  // 按顺序落盘所有脏模块（剧本 → 角色 → 变量 → UI 设计器）；返回是否全部保存成功
+  function saveAll(): Promise<boolean> {
+    if (savePromiseRef.current) return savePromiseRef.current
+    const p = doSaveAll()
+    savePromiseRef.current = p
+    void p.finally(() => {
+      if (savePromiseRef.current === p) savePromiseRef.current = null
+    })
+    return p
+  }
+
+  async function doSaveAll(): Promise<boolean> {
+    if (!isProjectDirty) return true
     setSaving(true)
     setError(null)
+    let ok = true
     try {
-      await window.pupurin.saveRpyFile(projectPath, currentFilePath, source)
-      setSourceModified(false)
-      // 通知插件：剧本已保存（事件钩子）
-      usePlugins.getState().emitHook('app:saved', { file: currentFilePath, projectPath })
+      const st = useStore.getState()
+      // 1. 剧本文件（先落盘，变量保存会基于磁盘上的 script.rpy 补 default 语句）
+      if (st.sourceModified) {
+        await window.pupurin.saveRpyFile(projectPath, currentFilePath, source)
+        setSourceModified(false)
+        // 通知插件：剧本已保存（事件钩子）
+        usePlugins.getState().emitHook('app:saved', { file: currentFilePath, projectPath })
+      }
+      // 2. 角色
+      if (st.charactersDirty) await st.saveCharactersNow()
+      // 3. 变量（主进程同步写回 script.rpy）
+      if (st.variablesDirty) await st.saveVariablesNow()
+      // 4. UI 设计器（写 gui.rpy / screens.rpy）
+      if (st.uiDirty) await useUiDesigner.getState().save()
     } catch (e) {
+      ok = false
       setError('保存失败：' + String(e))
     } finally {
       setSaving(false)
     }
+    return ok
+  }
+
+  // 返回项目列表：有未保存更改先弹窗确认
+  function handleBackToProjects(): void {
+    if (closingRef.current) return
+    if (isProjectDirty) {
+      closingRef.current = true
+      setClosePrompt('back')
+    } else {
+      setCurrentProject(null)
+    }
+  }
+
+  // 确认弹窗 → 保存并继续
+  async function handlePromptSave(): Promise<void> {
+    const action = closePrompt
+    setClosePrompt(null)
+    // 保存期间保持防重入锁；只有失败（留在当前界面）时才解锁
+    const ok = await saveAll()
+    if (!ok) {
+      closingRef.current = false
+      return // 保存失败则不继续（避免丢稿）
+    }
+    if (action === 'close') void window.pupurin.confirmClose()
+    else setCurrentProject(null)
+  }
+
+  // 确认弹窗 → 不保存直接继续
+  function handlePromptDiscard(): void {
+    const action = closePrompt
+    setClosePrompt(null)
+    closingRef.current = false
+    if (action === 'close') void window.pupurin.confirmClose()
+    else setCurrentProject(null)
+  }
+
+  // 确认弹窗 → 取消
+  function handlePromptCancel(): void {
+    setClosePrompt(null)
+    closingRef.current = false
+    // 复位主进程退出流程状态（Cmd+Q 取消后，红绿灯关窗应回到「隐藏」而非继续退出）
+    void window.pupurin.cancelClose()
   }
 
   // 运行 Ren'Py 游戏
   async function runGame(): Promise<void> {
+    if (running) return // 防重入：双击「运行」不会启动第二个游戏进程
     setRunning(true)
     setRunError(null)
     try {
@@ -122,6 +201,19 @@ function Ide({ projectPath }: { projectPath: string }) {
 
   useEffect(() => {
     void (async () => {
+      // 重新进入项目 = 全新会话：重置所有模块脏标记与编辑器状态
+      // （useStore 是全局单例，不重置会导致上次会话的 currentFilePath 等残留，
+      //   出现「文件树选中的文件 ≠ 编辑器展示的内容」）
+      useStore.getState().setCharactersDirty(false)
+      useStore.getState().setVariablesDirty(false)
+      useStore.getState().setUiDirty(false)
+      useStore.getState().setSourceModified(false)
+      // fetchScript 固定加载 script.rpy，此处同步打开文件与选中项
+      useStore.getState().setCurrentFilePath('script.rpy')
+      useStore.getState().setIsStoryFile(true)
+      // 清除上次会话的场景选中/滚动定位
+      useStore.getState().selectLabel(null)
+      useStore.getState().setSelection({ type: null, id: null })
       try {
         const st = await window.pupurin.getBackendStatus()
         setStatus(st)
@@ -138,18 +230,41 @@ function Ide({ projectPath }: { projectPath: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // UI 设计器 store 的 modified 桥接到全局 uiDirty（顶栏红点/保存统一感知）
+  useEffect(() => {
+    const unsub = useUiDesigner.subscribe((s, prev) => {
+      if (s.modified !== prev.modified) useStore.getState().setUiDirty(s.modified)
+    })
+    return unsub
+  }, [])
+
+  // 窗口关闭保护：主进程拦截 close 后询问；有未保存则弹窗确认，否则直接放行
+  useEffect(() => {
+    const unsub = window.pupurin.onBeforeClose(() => {
+      if (closingRef.current) return // 弹窗已打开，忽略重复请求
+      if (isProjectDirty) {
+        closingRef.current = true
+        setClosePrompt('close')
+      } else {
+        void window.pupurin.confirmClose()
+      }
+    })
+    return unsub
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isProjectDirty])
+
   // ⌘+S / Ctrl+S 保存快捷键
   useEffect(() => {
     const handler = (e: KeyboardEvent): void => {
       if ((e.metaKey || e.ctrlKey) && e.key === 's') {
         e.preventDefault()
-        void saveScriptFile()
+        void saveAll()
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sourceModified, saving, source, currentFilePath])
+  }, [isProjectDirty, saving, source, currentFilePath])
 
   // ⌘+P / Ctrl+P 打开全局搜索
   useEffect(() => {
@@ -169,10 +284,10 @@ function Ide({ projectPath }: { projectPath: string }) {
   menuHandlerRef.current = ({ id }: { id: string }): void => {
     switch (id) {
       case 'backToProjects':
-        setCurrentProject(null)
+        handleBackToProjects()
         break
       case 'save':
-        void saveScriptFile()
+        void saveAll()
         break
       case 'showInFinder':
         if (currentProject) void window.pupurin.showProjectInFinder(currentProject.path)
@@ -214,7 +329,7 @@ function Ide({ projectPath }: { projectPath: string }) {
       <header className={`flex items-center h-9 ${headerPad} bg-loom-bg border-b border-loom-border select-none`}>
         <img src={logoUrl} alt="Pupurin° Loom" className="h-6 w-auto" />
         <button
-          onClick={() => setCurrentProject(null)}
+          onClick={handleBackToProjects}
           title="返回项目选择"
           className="ml-2 p-1.5 rounded text-loom-muted hover:text-loom-accent hover:bg-loom-accent/10 transition-colors"
         >
@@ -224,7 +339,7 @@ function Ide({ projectPath }: { projectPath: string }) {
         </button>
         <span className="ml-1 text-xs text-loom-text font-mono truncate max-w-[200px]">
           {currentProject?.name}
-          {sourceModified && <span className="text-loom-err ml-0.5">●</span>}
+          {isProjectDirty && <span className="text-loom-err ml-0.5">●</span>}
         </span>
         <span className="ml-3 text-xs text-loom-muted font-mono">
           {PAGE_TITLES[activeView]}
@@ -269,12 +384,12 @@ function Ide({ projectPath }: { projectPath: string }) {
             </svg>
           </button>
           <button
-            onClick={() => saveScriptFile()}
-            disabled={!sourceModified || saving}
+            onClick={() => void saveAll()}
+            disabled={!isProjectDirty || saving}
             title="保存 (⌘+S)"
             className={[
               'px-2.5 py-1 text-[11px] rounded font-semibold transition-opacity',
-              sourceModified
+              isProjectDirty
                 ? 'bg-loom-accent text-loom-bg hover:opacity-90'
                 : 'bg-loom-panel2 text-loom-muted cursor-not-allowed'
             ].join(' ')}
@@ -336,6 +451,41 @@ function Ide({ projectPath }: { projectPath: string }) {
       <StatusBar />
       <SettingsDialog open={showSettings} onClose={() => setShowSettings(false)} />
       <SearchDialog open={showSearch} onClose={() => setShowSearch(false)} />
+
+      {/* 未保存确认弹窗（关窗口 / 返回项目列表共用） */}
+      {closePrompt && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50">
+          <div className="w-96 rounded-xl border border-loom-border bg-loom-panel shadow-2xl p-5">
+            <h3 className="text-sm font-semibold text-loom-text">有未保存的更改</h3>
+            <p className="mt-2 text-xs text-loom-muted leading-relaxed">
+              {closePrompt === 'close'
+                ? '关闭窗口前是否保存当前项目的更改？'
+                : '返回项目列表前是否保存当前项目的更改？'}
+            </p>
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button
+                onClick={handlePromptCancel}
+                className="px-3 py-1.5 text-[12px] rounded bg-loom-panel2 text-loom-muted hover:text-loom-text transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={handlePromptDiscard}
+                className="px-3 py-1.5 text-[12px] rounded bg-loom-err/20 text-loom-err hover:bg-loom-err/30 transition-colors"
+              >
+                不保存
+              </button>
+              <button
+                onClick={() => void handlePromptSave()}
+                disabled={saving}
+                className="px-3 py-1.5 text-[12px] rounded bg-loom-accent text-loom-bg font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity"
+              >
+                {saving ? '保存中…' : `保存并${closePrompt === 'close' ? '关闭' : '返回'}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

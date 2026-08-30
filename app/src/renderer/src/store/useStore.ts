@@ -57,6 +57,11 @@ interface LoomState {
   // 窗口是否全屏（共享给各页面 header 决定是否给红绿灯留位）
   isFullscreen: boolean
 
+  // 各模块脏状态（统一由顶栏「保存」集中落盘）
+  charactersDirty: boolean
+  variablesDirty: boolean
+  uiDirty: boolean
+
   setParse: (r: { labels: LabelNode[]; edges: FlowEdge[]; full_source: string; dialogue_chars: number }) => void
   setSource: (s: string) => void
   selectLabel: (id: string | null) => void
@@ -75,6 +80,12 @@ interface LoomState {
   setSelectedCharId: (id: string | null) => void
   setVariables: (v: VariableMeta[]) => void
   setSelectedVarId: (id: string | null) => void
+  setCharactersDirty: (b: boolean) => void
+  setVariablesDirty: (b: boolean) => void
+  setUiDirty: (b: boolean) => void
+  /** 统一保存入口的字符/变量落盘：写库并清除对应脏标记（由顶栏 saveAll 调度） */
+  saveCharactersNow: () => Promise<void>
+  saveVariablesNow: () => Promise<void>
   setSelection: (s: SelectionState) => void
   setEditorViewMode: (m: EditorViewMode) => void
   setStoryItems: (items: StoryItem[]) => void
@@ -97,7 +108,7 @@ interface LoomState {
   closeSidebar: () => void
 }
 
-export const useStore = create<LoomState>((set) => ({
+export const useStore = create<LoomState>((set, get) => ({
   labels: [],
   edges: [],
   source: '',
@@ -117,6 +128,9 @@ export const useStore = create<LoomState>((set) => ({
   selectedCharId: null,
   variables: [],
   selectedVarId: null,
+  charactersDirty: false,
+  variablesDirty: false,
+  uiDirty: false,
   storyItems: [],
   selection: { type: null, id: null },
   editorViewMode: 'graphical',
@@ -156,6 +170,22 @@ export const useStore = create<LoomState>((set) => ({
   setSelectedCharId: (id) => set({ selectedCharId: id }),
   setVariables: (v) => set({ variables: v }),
   setSelectedVarId: (id) => set({ selectedVarId: id }),
+  setCharactersDirty: (b) => set({ charactersDirty: b }),
+  setVariablesDirty: (b) => set({ variablesDirty: b }),
+  setUiDirty: (b) => set({ uiDirty: b }),
+  saveCharactersNow: async () => {
+    const { currentProject, characters } = get()
+    if (!currentProject) return
+    await window.pupurin.saveCharacters(currentProject.path, characters)
+    set({ charactersDirty: false })
+  },
+  saveVariablesNow: async () => {
+    const { currentProject, variables } = get()
+    if (!currentProject) return
+    // 主进程会同步把 default 语句写回 script.rpy
+    await window.pupurin.saveVariables(currentProject.path, variables)
+    set({ variablesDirty: false })
+  },
   setSelection: (s) => set({ selection: s }),
   setEditorViewMode: (m) => set({ editorViewMode: m }),
   setStoryItems: (items) => set({ storyItems: items }),

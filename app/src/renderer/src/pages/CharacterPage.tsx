@@ -22,7 +22,6 @@ export default function CharacterPage() {
 
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
-  const [dirty, setDirty] = useState(false)
   const [promptCfg, setPromptCfg] = useState<PromptConfig | null>(null)
 
   const projectPath = currentProject?.path ?? ''
@@ -44,6 +43,7 @@ export default function CharacterPage() {
     try {
       const list = await window.pupurin.loadCharacters(projectPath)
       setCharacters(list)
+      useStore.getState().setCharactersDirty(false)
       if (list.length > 0 && !list.find((c) => c.id === selectedCharId)) {
         setSelectedCharId(list[0].id)
       }
@@ -59,25 +59,10 @@ export default function CharacterPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectPath])
 
-  // 保存
-  async function save(): Promise<void> {
-    if (!projectPath) return
-    setBusy(true)
-    setErr(null)
-    try {
-      await window.pupurin.saveCharacters(projectPath, characters)
-      setDirty(false)
-    } catch (e) {
-      setErr(String(e))
-    } finally {
-      setBusy(false)
-    }
-  }
-
   // 更新单个角色
   function updateChar(id: string, patch: Partial<CharacterMeta>): void {
     setCharacters(characters.map((c) => (c.id === id ? { ...c, ...patch } : c)))
-    setDirty(true)
+    useStore.getState().setCharactersDirty(true)
   }
 
   // 新建角色
@@ -90,7 +75,7 @@ export default function CharacterPage() {
         const c = await window.pupurin.newCharacter(name)
         setCharacters([...characters, c])
         setSelectedCharId(c.id)
-        setDirty(true)
+        useStore.getState().setCharactersDirty(true)
       }
     })
   }
@@ -103,7 +88,7 @@ export default function CharacterPage() {
     if (selectedCharId === id) {
       setSelectedCharId(remaining[0]?.id ?? null)
     }
-    setDirty(true)
+    useStore.getState().setCharactersDirty(true)
   }
 
   // 立绘差分管理
@@ -119,7 +104,7 @@ export default function CharacterPage() {
             c.id === charId ? { ...c, sprites: [...c.sprites, sp] } : c
           )
         )
-        setDirty(true)
+        useStore.getState().setCharactersDirty(true)
       }
     })
   }
@@ -132,7 +117,7 @@ export default function CharacterPage() {
           : c
       )
     )
-    setDirty(true)
+    useStore.getState().setCharactersDirty(true)
   }
 
   // 同步单个差分到 script.rpy（新增/更新/删除 image 定义）
@@ -190,7 +175,7 @@ export default function CharacterPage() {
           )
           // 同步 script.rpy：新增 image 定义
           await syncSpriteToScript(char.varName, name, finalPath)
-          setDirty(true)
+          useStore.getState().setCharactersDirty(true)
         }
       })
     } catch (e) {
@@ -206,7 +191,7 @@ export default function CharacterPage() {
         c.id === charId ? { ...c, sprites: c.sprites.filter((s) => s.id !== spriteId) } : c
       )
     )
-    setDirty(true)
+    useStore.getState().setCharactersDirty(true)
     // 同步 script.rpy：删除 image 定义
     if (char && sp) {
       await syncSpriteToScript(char.varName, sp.name, '')
@@ -267,16 +252,6 @@ export default function CharacterPage() {
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-lg font-semibold">{selected.name}</h2>
               <div className="flex items-center gap-2">
-                {dirty && (
-                  <span className="text-[11px] text-loom-accent font-mono">● 未保存</span>
-                )}
-                <button
-                  onClick={save}
-                  disabled={busy || !dirty}
-                  className="px-3 py-1 text-xs rounded bg-loom-accent text-loom-bg font-semibold hover:opacity-90 disabled:opacity-40 transition-opacity"
-                >
-                  {busy ? '保存中…' : '保存'}
-                </button>
                 <button
                   onClick={() => handleDelete(selected.id, selected.name)}
                   className="px-3 py-1 text-xs rounded bg-loom-err/20 text-loom-err hover:bg-loom-err/30 transition-colors"
