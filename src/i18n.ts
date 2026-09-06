@@ -1,6 +1,6 @@
 // 官网 i18n 词典：zh 由 config.ts 派生（保证与静态渲染一致），en 手工维护。
 // 运行时由 src/scripts/i18n.ts 通过 [data-i18n] 属性切换文案。
-import { site, nav, features, steps } from './config'
+import { site, nav, features, steps, downloadSlides } from './config'
 
 export type Lang = 'zh' | 'en'
 
@@ -12,14 +12,19 @@ const zh: Record<string, string> = {
   'features.title': '特性',
   'features.sub': '围绕 Ren\'Py 剧本创作打造的完整工作台 —— 从剧情编排到打包发行。',
   // 下载区
-  'download.title': '下载',
-  'download.sub': '跨平台可视化 Ren\'Py 开发工具，支持 macOS 与 Windows。',
-  'download.latest': '最新稳定版',
-  'download.all': '全部版本',
-  'download.dmg': '.dmg 安装包',
-  'download.exe': '.exe 安装包',
-  'download.note':
-    '安装后应用内置「检查更新」：自动对比官方 Releases，发现新版本会展示更新详情并引导下载安装。所有发行包均在 GitHub Releases 提供，欢迎前往查看更新说明与历史版本。',
+  'download.title': '故事以此为始',
+  'download.sub': '下载铃言织机°，轻松上手制作Galgame。',
+  'download.source': '下载源',
+  'download.srcMirror': '镜像源',
+  'download.verOther': '其他版本',
+  'download.viewAll': '查看全部版本',
+  'download.btnMac': '下载 macOS 版',
+  'download.btnWin': '下载 Windows 版',
+  'download.btnAll': '下载铃言织机°',
+  'download.meta.mac': 'macOS · Apple 芯片（M 系列）',
+  'download.meta.win': 'Windows · .exe 安装包',
+  'download.meta.other': '已为你打开全部版本页',
+  'download.android.badge': '第三方安卓测试版',
   // 插件区
   'plugins.title': '插件生态',
   'plugins.sub':
@@ -53,6 +58,12 @@ features.forEach((f) => {
 steps.forEach((s, i) => {
   zh[`step.${i}.title`] = s.title
   zh[`step.${i}.desc`] = s.desc
+})
+downloadSlides.forEach((s, i) => {
+  zh[`download.slide.${i}.t1`] = s.t1
+  zh[`download.slide.${i}.t2`] = s.t2
+  zh[`download.slide.${i}.desc`] = s.desc
+  if (s.extra) zh[`download.slide.${i}.extra`] = s.extra
 })
 
 const en: Record<string, string> = {
@@ -98,14 +109,36 @@ const en: Record<string, string> = {
   'feature.terminal.desc':
     'Parsing and statistics run locally, never uploaded — your scripts and data stay on your machine.',
   // 下载区
-  'download.title': 'Download',
-  'download.sub': 'A cross-platform visual Ren\'Py development tool for macOS and Windows.',
-  'download.latest': 'Latest stable release',
-  'download.all': 'All versions',
-  'download.dmg': '.dmg installer',
-  'download.exe': '.exe installer',
-  'download.note':
-    'The app includes a built-in update checker: it compares against official Releases automatically and guides you to download new versions. All packages are provided on GitHub Releases — check release notes and past versions there.',
+  'download.title': 'Where Stories Begin',
+  'download.sub': 'Download Pupurin° Loom and start making Galgames with ease.',
+  'download.source': 'Source',
+  'download.srcMirror': 'Mirror',
+  'download.verOther': 'Other versions',
+  'download.viewAll': 'View all versions',
+  'download.btnMac': 'Download for macOS',
+  'download.btnWin': 'Download for Windows',
+  'download.btnAll': 'Download Pupurin° Loom',
+  'download.meta.mac': 'macOS · Apple Silicon (M series)',
+  'download.meta.win': 'Windows · .exe installer',
+  'download.meta.other': 'We have opened the releases page for you.',
+  'download.android.badge': 'Third-party Android beta',
+  'download.slide.0.t1': 'Effortless Creation',
+  'download.slide.0.t2': 'Loom° Has You Covered',
+  'download.slide.0.desc':
+    'Edit scripts, design UI, and manage variables visually…\nStart making Galgames with ease — Loom° has you covered.',
+  'download.slide.1.t1': 'Purpose-Built',
+  'download.slide.1.t2': "Ren'Py? No Problem",
+  'download.slide.1.desc':
+    "Ren'Py is an engine purpose-built for visual novels, with nearly every core feature built in. Dialogue boxes, save/load, branch options — no problem at all.",
+  'download.slide.2.t1': 'Ship Everywhere*',
+  'download.slide.2.t2': 'Zenzen Daijōbu',
+  'download.slide.2.desc':
+    "Use Loom°'s one-click packaging to publish your work to Windows, macOS, Linux, Android, iOS, and the Web.\n* HarmonyOS is not supported",
+  'download.slide.3.t1': 'Galgame on Mobile',
+  'download.slide.3.t2': 'Loom° Delivers',
+  'download.slide.3.desc': 'A third-party Android beta is now available — visit the repository:',
+  'download.slide.3.extra':
+    '° The Android version is developed and maintained by a third party. Pupurin° Studio makes no guarantees about its updates, security, completeness, or runnability.',
   // 插件区
   'plugins.title': 'Plugin Ecosystem',
   'plugins.sub':
@@ -129,7 +162,7 @@ const en: Record<string, string> = {
     'Point to your Ren\'Py SDK and package a distributable game in one click.',
   // 关于
   'about.title': 'About',
-  'about.subtitle': 'Pupurin°',
+  'about.subtitle': 'Pupurin° Studio',
   'about.p1':
     'Pupurin° Loom is a visual Ren\'Py development tool by Pupurin°, with the motto 「Pupurin spins, stories begin.」 — making visual novel creation as effortless as weaving.',
   'about.p2':

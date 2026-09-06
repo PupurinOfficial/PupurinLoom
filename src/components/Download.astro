@@ -1,36 +1,413 @@
 ---
-import { site } from '../config'
+import { site, downloadSlides } from '../config'
 import Icon from './Icon.astro'
-import TitleRing from './TitleRing.astro'
+const releasesUrl = site.urls.releases
 ---
-<section class="download-wrap">
-  <div class="section" id="download">
-    <h2 class="section-title"><TitleRing i18n="download.title">下载</TitleRing></h2>
-    <p class="section-sub" data-i18n="download.sub">跨平台可视化 Ren'Py 开发工具，支持 macOS 与 Windows。</p>
-    <div class="version-line">
-      <span class="badge">v{site.version}</span>
-      <span style="color: var(--muted); font-size: 14px" data-i18n="download.latest">最新稳定版</span>
+
+<section class="download-wrap" id="download" data-releases-url={releasesUrl}>
+  <div class="section dl-section">
+    <div class="dl-layout">
+      <!-- 左侧：标题 + 下载操作区 -->
+      <div class="dl-left">
+        <h2 class="dl-title">
+          <span class="dl-title-zh" data-i18n="download.title">故事以此为始</span>
+        </h2>
+        <p class="dl-sub" data-i18n="download.sub">下载铃言织机°，轻松上手制作Galgame。</p>
+
+        <!-- 下载源选择 -->
+        <div class="src-select">
+          <span class="src-caption" data-i18n="download.source">下载源</span>
+          <div class="src-pills" role="group" aria-label="download source">
+            <button type="button" class="src-pill is-active" data-src="github">GitHub</button>
+            <button type="button" class="src-pill" data-src="mirror" data-i18n="download.srcMirror">镜像源</button>
+          </div>
+        </div>
+
+        <!-- 主下载按钮 + 版本选择 -->
+        <div class="dl-actions">
+          <a class="dl-main-btn" id="dl-main-btn" href={releasesUrl} target="_blank" rel="noopener">
+            <Icon name="download" size={22} />
+            <span class="dl-btn-main">
+              <span class="dl-btn-label" id="dl-btn-label">下载 macOS 版</span>
+              <span class="dl-btn-ver" id="dl-btn-ver">v0.4.0</span>
+            </span>
+          </a>
+          <div class="ver-picker" id="ver-picker">
+            <button type="button" class="ver-btn" id="ver-btn" aria-haspopup="true" aria-expanded="false" aria-label="Other versions" title="Other versions">
+              <Icon name="chev" size={16} />
+            </button>
+            <div class="ver-menu" id="ver-menu" hidden>
+              <div class="ver-menu-head" data-i18n="download.verOther">其他版本</div>
+              <div class="ver-tabs" role="group" aria-label="platform">
+                <button type="button" class="ver-tab" data-os="mac">macOS</button>
+                <button type="button" class="ver-tab" data-os="win">Windows</button>
+              </div>
+              <ul class="ver-list" id="ver-list"></ul>
+              <a class="ver-all" href={releasesUrl} target="_blank" rel="noopener">
+                <span data-i18n="download.viewAll">查看全部版本</span>
+                <Icon name="external" size={12} />
+              </a>
+            </div>
+          </div>
+        </div>
+        <p class="dl-meta" id="dl-meta">macOS · Apple 芯片（M 系列）</p>
+      </div>
+
+      <!-- 右侧：特点展示轮播 -->
+      <aside class="dl-show" aria-label="features">
+        <div class="show-window" id="show-window">
+          <div class="show-track" id="show-track">
+            {downloadSlides.map((s, i) => (
+              <article class={`dl-slide ${s.grad}`} data-slide>
+                <div class="dl-slide-top">
+                  <span class="dl-slide-ico"><Icon name={s.icon} size={26} /></span>
+                  <span class="dl-slide-idx">0{i + 1}</span>
+                </div>
+                <h3 class="dl-slide-t1" data-i18n={`download.slide.${i}.t1`}>{s.t1}</h3>
+                <p class="dl-slide-t2" data-i18n={`download.slide.${i}.t2`}>{s.t2}</p>
+                <p class="dl-slide-desc" data-i18n={`download.slide.${i}.desc`}>{s.desc}</p>
+                {s.link && (
+                  <p class="dl-slide-link">
+                    <a href={s.link.url} target="_blank" rel="noopener">
+                      {s.link.text}
+                      <Icon name="external" size={12} />
+                    </a>
+                  </p>
+                )}
+                {s.extra && (
+                  <p class="dl-slide-extra" data-i18n={`download.slide.${i}.extra`}>{s.extra}</p>
+                )}
+              </article>
+            ))}
+          </div>
+        </div>
+      </aside>
     </div>
-    <div class="download-grid">
-      <a class="dl-card" href={site.urls.releases} target="_blank" rel="noopener">
-        <div class="ico"><Icon name="apple" size={26} /></div>
-        <h4>macOS</h4>
-        <p data-i18n="download.dmg">.dmg 安装包</p>
-      </a>
-      <a class="dl-card" href={site.urls.releases} target="_blank" rel="noopener">
-        <div class="ico"><Icon name="windows" size={26} /></div>
-        <h4>Windows</h4>
-        <p data-i18n="download.exe">.exe 安装包</p>
-      </a>
-      <a class="dl-card" href={site.urls.releases} target="_blank" rel="noopener">
-        <div class="ico"><Icon name="download" size={26} /></div>
-        <h4><span data-i18n="download.all">全部版本</span></h4>
-        <p>GitHub Releases</p>
-      </a>
-    </div>
-    <p class="dl-note" data-i18n="download.note">
-      安装后应用内置「检查更新」：自动对比官方 Releases，发现新版本会展示更新详情并引导下载安装。
-      所有发行包均在 GitHub Releases 提供，欢迎前往查看更新说明与历史版本。
-    </p>
   </div>
 </section>
+
+<script>
+  import { messages } from '../i18n'
+
+  const REPO = 'PupurinOfficial/PupurinLoom'
+  const API = `https://api.github.com/repos/${REPO}/releases`
+  // 国内镜像前缀：加速 GitHub Releases 直链下载（格式为“前缀 + 原 github 直链”），可随时替换
+  const MIRROR = 'https://ghfast.top/'
+  // API 不可达时的兜底数据（与当前最新 Release 保持一致，可手工更新）
+  const FALLBACK = {
+    tag: 'v0.4.1',
+    date: '2026-08-30',
+    assets: [
+      {
+        name: '-0.4.1.dmg',
+        url: `https://github.com/${REPO}/releases/download/v0.4.1/-0.4.1.dmg`,
+      },
+      {
+        name: '-0.4.1-setup.exe',
+        url: `https://github.com/${REPO}/releases/download/v0.4.1/-0.4.1-setup.exe`,
+      },
+    ],
+  }
+
+  const $ = (sel) => document.querySelector(sel)
+  const releasesUrl =
+    $('#download')?.getAttribute('data-releases-url') || `https://github.com/${REPO}/releases`
+
+  function t(key) {
+    const lang = (document.documentElement.lang || 'zh-CN').startsWith('en') ? 'en' : 'zh'
+    return messages[lang][key] ?? messages.zh[key] ?? key
+  }
+
+  // ---------- 平台识别 ----------
+  function detectOs() {
+    const ua = navigator.userAgent.toLowerCase()
+    if (/android/i.test(ua)) return 'android'
+    if (/iphone|ipad|ipod/i.test(ua)) return 'ios'
+    if (/mac os/i.test(ua) && !/windows/i.test(ua)) return 'mac'
+    if (/windows/i.test(ua)) return 'win'
+    if (/linux/i.test(ua)) return 'linux'
+    return 'other'
+  }
+
+  // ---------- Release 数据 ----------
+  interface Rel {
+    tag: string
+    date: string
+    assets: { name: string; url: string }[]
+  }
+  let list: Rel[] = []
+  let source: 'github' | 'mirror' = 'github'
+  // 下拉框中默认展示的平台（大按钮仍按访客系统自动识别）
+  let dropOs: 'mac' | 'win' = detectOs() === 'win' ? 'win' : 'mac'
+
+  function pickAsset(rel: Rel | null, os: string) {
+    if (!rel || !rel.assets?.length) return null
+    if (os === 'mac') {
+      return rel.assets.find((a) => a.name.toLowerCase().endsWith('.dmg')) || rel.assets[0]
+    }
+    if (os === 'win') {
+      return (
+        rel.assets.find((a) => a.name.toLowerCase().endsWith('.exe')) ||
+        rel.assets.find((a) => a.name.toLowerCase().endsWith('.msi')) ||
+        null
+      )
+    }
+    return null
+  }
+  function withSource(url: string) {
+    return source === 'mirror' && url.startsWith('https://github.com/') ? MIRROR + url : url
+  }
+
+  // ---------- 版本下拉菜单 ----------
+  const picker = $('#ver-picker')
+  const verBtn = $('#ver-btn')
+  const verMenu = $('#ver-menu')
+  const verList = $('#ver-list')
+
+  verBtn?.addEventListener('click', (e) => {
+    e.stopPropagation()
+    const willOpen = verMenu.hasAttribute('hidden')
+    verMenu.toggleAttribute('hidden')
+    verBtn.setAttribute('aria-expanded', String(willOpen))
+  })
+  document.addEventListener('click', (e) => {
+    if (picker && !picker.contains(e.target as Node)) {
+      verMenu?.setAttribute('hidden', '')
+      verBtn?.setAttribute('aria-expanded', 'false')
+    }
+  })
+
+  function renderMenu(activeTag: string) {
+    if (!verList) return
+    verList.textContent = ''
+    list.forEach((rel) => {
+      const li = document.createElement('li')
+      const a = document.createElement('a')
+      a.className = 'ver-item'
+      a.textContent = ''
+      a.dataset.tag = rel.tag
+      if (rel.tag === activeTag) a.classList.add('is-current')
+
+      const tag = document.createElement('span')
+      tag.textContent = rel.tag
+      const date = document.createElement('span')
+      date.className = 'ver-date'
+      date.textContent = rel.date
+
+      a.append(tag, date)
+      a.addEventListener('click', () => {
+        verMenu?.setAttribute('hidden', '')
+        verBtn?.setAttribute('aria-expanded', 'false')
+      })
+      li.appendChild(a)
+      verList.appendChild(li)
+    })
+  }
+
+  function refreshHrefs() {
+    if (!verList) return
+    verList.querySelectorAll<HTMLAnchorElement>('.ver-item').forEach((a) => {
+      const rel = list.find((r) => r.tag === a.dataset.tag)
+      const asset = pickAsset(rel, dropOs)
+      if (asset) {
+        a.href = withSource(asset.url)
+        a.removeAttribute('target')
+      } else {
+        a.href = releasesUrl
+        a.target = '_blank'
+        a.rel = 'noopener'
+      }
+    })
+  }
+
+  // ---------- 下拉框平台切换（macOS / Windows） ----------
+  const dropTabs = Array.from(document.querySelectorAll<HTMLButtonElement>('.ver-tab'))
+  function setDropOs(os: 'mac' | 'win') {
+    dropOs = os
+    dropTabs.forEach((b) => b.classList.toggle('is-active', b.dataset.os === os))
+    refreshHrefs()
+  }
+  dropTabs.forEach((tab) => {
+    tab.addEventListener('click', () => setDropOs(tab.dataset.os === 'win' ? 'win' : 'mac'))
+  })
+  setDropOs(dropOs)
+
+  // ---------- 主按钮渲染 ----------
+  const mainBtn = $('#dl-main-btn')
+  const labelEl = $('#dl-btn-label')
+  const verEl = $('#dl-btn-ver')
+  const metaEl = $('#dl-meta')
+
+  function currentRelease() {
+    return list[0] || null
+  }
+
+  function renderMain() {
+    if (!mainBtn || !labelEl || !verEl || !metaEl) return
+    const os = detectOs()
+    const rel = currentRelease()
+    const asset = pickAsset(rel, os)
+
+    let labelKey: string
+    let metaKey: string
+    if (os === 'mac') {
+      labelKey = 'download.btnMac'
+      metaKey = 'download.meta.mac'
+    } else if (os === 'win') {
+      labelKey = 'download.btnWin'
+      metaKey = 'download.meta.win'
+    } else {
+      labelKey = 'download.btnAll'
+      metaKey = 'download.meta.other'
+    }
+    // 挂上 i18n 键：语言原地切换时与静态文案一起被 apply() 替换
+    labelEl.dataset.i18n = labelKey
+    metaEl.dataset.i18n = metaKey
+    labelEl.textContent = t(labelKey)
+    metaEl.textContent = t(metaKey)
+
+    verEl.textContent = rel?.tag ? rel.tag.replace(/^v/i, 'v') : ''
+    if (asset) {
+      mainBtn.href = withSource(asset.url)
+      mainBtn.removeAttribute('target')
+    } else {
+      mainBtn.href = releasesUrl
+      mainBtn.setAttribute('target', '_blank')
+      mainBtn.setAttribute('rel', 'noopener')
+    }
+  }
+
+  // ---------- 下载源切换 ----------
+  document.querySelectorAll<HTMLButtonElement>('.src-pill').forEach((pill) => {
+    pill.addEventListener('click', () => {
+      source = (pill.dataset.src as 'github' | 'mirror') || 'github'
+      document.querySelectorAll('.src-pill').forEach((p) => p.classList.remove('is-active'))
+      pill.classList.add('is-active')
+      renderMain()
+      refreshHrefs()
+    })
+  })
+
+  // ---------- 初始化：拉取 Releases ----------
+  async function initData() {
+    try {
+      const res = await fetch(`${API}?per_page=8`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const json = await res.json()
+      list = (Array.isArray(json) ? json : [])
+        .filter((r) => !r.draft)
+        .map((r) => ({
+          tag: r.tag_name || '',
+          date: (r.published_at || '').slice(0, 10),
+          assets: (r.assets || [])
+            .filter((a: { name: string }) => !a.name.endsWith('.blockmap'))
+            .map((a: { name: string; browser_download_url: string }) => ({
+              name: a.name,
+              url: a.browser_download_url,
+            })),
+        }))
+        .filter((r) => r.tag)
+      if (!list.length) throw new Error('empty list')
+    } catch {
+      list = [
+        {
+          tag: FALLBACK.tag,
+          date: FALLBACK.date,
+          assets: FALLBACK.assets,
+        },
+      ]
+    }
+    const latestTag = list[0]?.tag || ''
+    renderMain()
+    renderMenu(latestTag)
+    refreshHrefs()
+  }
+
+  // ---------- 右侧特点轮播（自动向上，非线性缓动，无缝循环） ----------
+  function initCarousel() {
+    const win = $('#show-window')
+    const track = $('#show-track')
+    if (!win || !track) return
+    const slides = Array.from(track.querySelectorAll<HTMLElement>('[data-slide]'))
+    const N = slides.length
+    if (N < 2) return
+
+    // 追加首屏副本实现无缝回卷（对读屏隐藏副本，避免重复朗读）
+    const clone = slides[0].cloneNode(true) as HTMLElement
+    clone.setAttribute('aria-hidden', 'true')
+    track.appendChild(clone)
+    const cells = [...slides, clone]
+
+    let idx = 0
+    let H = 0
+    let timer = 0
+
+    function measure() {
+      let max = 0
+      slides.forEach((el) => {
+        max = Math.max(max, el.scrollHeight)
+      })
+      H = Math.ceil(max)
+      cells.forEach((el) => {
+        el.style.height = `${H}px`
+      })
+      win.style.height = `${H}px`
+    }
+    function snap(animate = true) {
+      track.style.transition = animate ? '' : 'none'
+      track.style.transform = `translateY(-${idx * H}px)`
+      if (!animate) void track.offsetHeight
+    }
+    function reset() {
+      idx = 0
+      snap(false)
+    }
+    function step() {
+      measure()
+      if (idx >= N) {
+        reset()
+        return
+      }
+      idx += 1
+      snap(true)
+    }
+    track.addEventListener('transitionend', () => {
+      if (idx === N) reset()
+    })
+
+    function start() {
+      stop()
+      timer = window.setInterval(step, 4200)
+    }
+    function stop() {
+      if (timer) window.clearInterval(timer)
+    }
+    win.addEventListener('mouseenter', stop)
+    win.addEventListener('mouseleave', start)
+
+    const onResize = () => {
+      measure()
+      snap(false)
+    }
+    window.addEventListener('resize', onResize)
+    // 语言原地切换后文案高度可能变化，重新测量并吸附回原位
+    window.addEventListener('i18nchange', () => {
+      measure()
+      snap(false)
+    })
+    measure()
+
+    // 等首屏渲染与语言切换完成后校准一次（i18n 可能调整文案高度）
+    requestAnimationFrame(() => {
+      measure()
+      snap(false)
+    })
+    start()
+  }
+
+  // 原地切换语言后，重新渲染 JS 生成的按钮与说明文案
+  window.addEventListener('i18nchange', () => renderMain())
+
+  initData()
+  initCarousel()
+</script>

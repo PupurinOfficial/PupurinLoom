@@ -52,6 +52,8 @@ function apply(lang: Lang): void {
     btn.classList.toggle('active', active)
     btn.setAttribute('aria-pressed', String(active))
   })
+  // 通知页面内由 JS 生成的动态文案（如下载按钮/meta）随语言重绘
+  document.dispatchEvent(new CustomEvent('i18nchange', { detail: lang }))
 }
 
 function initLangSwitcher(): void {

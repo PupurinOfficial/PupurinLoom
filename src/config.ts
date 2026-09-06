@@ -19,8 +19,53 @@ export const site = {
     contributing: 'https://github.com/PupurinOfficial/Loom-PluginStore/blob/main/CONTRIBUTING.md',
     bilibili: 'https://space.bilibili.com/3546379813129005',
     org: 'https://github.com/PupurinOfficial',
+    androidRepo: 'https://github.com/Explore0416/PupurinLoomAndroid',
   },
 }
+
+// 下载区轮播「特点展示」：grad/icon 为视觉字段，其余文案的 en 版见 src/i18n.ts
+export interface DownloadSlide {
+  grad: string // 渐变配色类（.dl-slide.g1 ~ g4）
+  icon: string // Icon.astro 图标名
+  t1: string // 大标题第一行
+  t2: string // 大标题第二行（强调）
+  desc: string // 描述
+  extra?: string // 追加脚注（展示为独立小段落）
+  link?: { url: string; text: string } // 描述后的链接
+}
+export const downloadSlides: DownloadSlide[] = [
+  {
+    grad: 'g1',
+    icon: 'magic',
+    t1: '轻松上手',
+    t2: '织机°势在必得',
+    desc: '以图形化的方式编辑剧本、设计UI、管理变量…\n轻松上手制作Galgame，铃言织机°势在必得。',
+  },
+  {
+    grad: 'g2',
+    icon: 'cog',
+    t1: '专器专用',
+    t2: "Ren'py不在话下",
+    desc: "Ren'py是专为视觉小说设计的引擎，内置了几乎所有核心功能。对话框、存读档、分支选项等，统统不在话下。",
+  },
+  {
+    grad: 'g3',
+    icon: 'globe',
+    t1: '全平台*传播',
+    t2: 'ぜんぜん大丈夫',
+    desc: '使用织机°内置的一键打包，将您的作品发布至Windows、macOS、Linux、Android、iOS，还有Web端。\n*不支持鸿蒙系统',
+  },
+  {
+    grad: 'g4',
+    icon: 'phone',
+    t1: '手机做Galgame',
+    t2: '织机°能行',
+    desc: '第三方安卓测试版现已上线，前往仓库：',
+    extra:
+      '° 安卓版由第三方提供技术支持与维护，\n仆仆铃°工作室不对其更新、安全性、完整性、可运行性等任何内容作保证。',
+    link: { url: 'https://github.com/Explore0416/PupurinLoomAndroid', text: 'Explore0416/PupurinLoomAndroid' },
+  },
+]
 
 export interface Feature {
   icon: string // 图标 id（见 global.css 中 .ico-* 内联 svg）
