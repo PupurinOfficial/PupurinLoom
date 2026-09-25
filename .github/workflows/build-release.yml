@@ -141,7 +141,15 @@ jobs:
         run: npm ci
 
       - name: Build & package
-        run: npm run dist:linux
+        run: |
+          set -o pipefail
+          npm run dist:linux 2>&1 | tee /tmp/dist-linux.log || {
+            # Linux 打包涉及的下载型工具较多（appimage/fpm），失败原因往往藏在日志尾部；
+            # 转成 annotation 便于在不下载完整日志的情况下定位
+            msg=$(tail -n 12 /tmp/dist-linux.log | sed ':a;N;$!ba;s/\n/%0A/g' | cut -c1-900)
+            echo "::error title=dist:linux failed::$msg"
+            exit 1
+          }
 
       - name: Upload assets to Release
         uses: softprops/action-gh-release@v2
