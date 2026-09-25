@@ -307,9 +307,33 @@ declare global {
       pluginFsRead: (projectPath: string, subPath: string) => Promise<string | null>
       pluginFsWrite: (projectPath: string, subPath: string, content: string) => Promise<void>
       pluginFsList: (projectPath: string, subDir: string) => Promise<Array<{ name: string; isDir: boolean; path: string }>>
+      pluginFsRemove: (projectPath: string, subPath: string) => Promise<void>
       pluginFsUploadImage: (projectPath: string) => Promise<{ path: string; name: string; cancelled: boolean }>
-      pluginHttp: (method: string, url: string, body?: string, headers?: Record<string, string>) => Promise<{ ok: boolean; status: number; text: string }>
+      pluginHttp: (
+        method: string,
+        url: string,
+        body?: string,
+        headers?: Record<string, string>,
+        opts?: { timeoutMs?: number; maxBytes?: number }
+      ) => Promise<{ ok: boolean; status: number; text: string }>
       pluginExec: (command: string) => Promise<{ code: number | null; stdout: string; stderr: string }>
+      // 插件长任务：白名单工具（renpy / ffmpeg），输出流式回传 + 可取消
+      pluginTaskStart: (opts: {
+        id?: string
+        tool: 'renpy' | 'ffmpeg'
+        projectPath?: string
+        args: string[]
+        cwd?: string
+        timeoutMs?: number
+        maxOutputBytes?: number
+      }) => Promise<{ id: string }>
+      pluginTaskCancel: (id: string) => Promise<boolean>
+      onPluginTaskEvent: (cb: (ev: PluginTaskEvent) => void) => () => void
+      // 工具可用性：ffmpeg 按需下载
+      pluginFfmpegEnsure: () => Promise<{ path: string; source: 'system' | 'downloaded' | '' }>
+      pluginFfmpegStatus: () => Promise<{ path: string; source: 'system' | 'downloaded' | '' }>
+      onPluginFfmpegProgress: (cb: (msg: string) => void) => () => void
+      pluginShellOpenPath: (projectPath: string, subPath: string) => Promise<string>
       // 插件商城（链路验证）
       storeFetchIndex: (indexUrl: string) => Promise<{ ok: boolean; index?: { plugins: StorePlugin[] }; error?: string; stale?: boolean }>
       storeInstall: (entry: StorePlugin) => Promise<{ ok: boolean; meta?: PluginMeta; error?: string }>
@@ -334,6 +358,19 @@ export interface PluginMeta {
   icon?: string
   /** 由「创建插件」模板生成，插件页显示开发引导 */
   scaffolded?: boolean
+}
+
+// 插件长任务（loom.task）事件
+export interface PluginTaskEvent {
+  id: string
+  type: 'output' | 'exit'
+  stream?: 'stdout' | 'stderr'
+  chunk?: string
+  code?: number | null
+  signal?: string | null
+  canceled?: boolean
+  timedOut?: boolean
+  error?: string
 }
 
 // 插件商城条目

@@ -2,8 +2,10 @@ import { app, shell, dialog, net, type BrowserWindow } from 'electron'
 import { join, dirname, resolve, sep, extname, basename } from 'node:path'
 import { promises as fs } from 'node:fs'
 import { spawn } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { GALLERY_MANIFEST, galleryMain } from './builtinPlugins/gallery'
 import { I18N_MANIFEST, i18nMain } from './builtinPlugins/i18n'
+import { MOMENTS_MANIFEST, momentsMain } from './builtinPlugins/moments'
 
 // 插件系统（Phase 1：命令 + 面板视图）
 // 目录结构：userData/plugins/<id>/{manifest.json, main.js}
@@ -247,6 +249,7 @@ async function ensureBuiltinPlugins(): Promise<void> {
   await ensureBuiltinPlugin('meow-loom', EXAMPLE_MANIFEST, EXAMPLE_MAIN)
   await ensureBuiltinPlugin('pupurin-gallery', GALLERY_MANIFEST, galleryMain)
   await ensureBuiltinPlugin('pupurin-i18n', I18N_MANIFEST, i18nMain)
+  await ensureBuiltinPlugin('pupurin-moments', MOMENTS_MANIFEST, momentsMain)
 }
 
 // ---- 扫描插件目录 ----
@@ -492,6 +495,12 @@ export async function pluginFsWrite(projectPath: string, subPath: string, conten
   console.log('[pluginFsWrite]', target, 'bytes=' + Buffer.byteLength(content, 'utf-8'))
 }
 
+// 删除项目内文件（用于清理插件临时注入的文件）；文件不存在时静默返回
+export async function pluginFsRemove(projectPath: string, subPath: string): Promise<void> {
+  const target = resolveInProject(projectPath, subPath)
+  await fs.rm(target, { force: true })
+}
+
 export async function pluginFsList(
   projectPath: string,
   subDir: string
@@ -539,20 +548,35 @@ export async function pluginFsUploadImage(
 }
 
 // HTTP：主进程代理请求（渲染层无 CORS 限制）
+// opts 供 AI 类插件使用：timeoutMs 放宽超时（大模型生成常需数十秒），maxBytes 放宽响应上限（结构化结果易超 5KB）
+const HTTP_DEFAULT_TIMEOUT = 15000
+const HTTP_DEFAULT_MAX_BYTES = 5000
+const HTTP_MAX_TIMEOUT = 10 * 60 * 1000
+const HTTP_MAX_BYTES = 2 * 1024 * 1024
+
 export async function pluginHttp(
   method: string,
   url: string,
   body?: string,
-  headers?: Record<string, string>
+  headers?: Record<string, string>,
+  opts?: { timeoutMs?: number; maxBytes?: number }
 ): Promise<{ ok: boolean; status: number; text: string }> {
   if (!/^https?:\/\//.test(url)) throw new Error('仅支持 http/https 地址')
+  const timeoutMs = clampInt(opts?.timeoutMs, HTTP_DEFAULT_TIMEOUT, 1000, HTTP_MAX_TIMEOUT)
+  const maxBytes = clampInt(opts?.maxBytes, HTTP_DEFAULT_MAX_BYTES, 1000, HTTP_MAX_BYTES)
   const res = await net.fetch(url, {
     method: String(method || 'GET').toUpperCase(),
     headers: headers ?? undefined,
     body: body ?? undefined,
-    signal: AbortSignal.timeout(15000),
+    signal: AbortSignal.timeout(timeoutMs),
   })
-  return { ok: res.ok, status: res.status, text: (await res.text()).slice(0, 5000) }
+  return { ok: res.ok, status: res.status, text: (await res.text()).slice(0, maxBytes) }
+}
+
+function clampInt(v: unknown, fallback: number, min: number, max: number): number {
+  const n = typeof v === 'number' ? Math.floor(v) : NaN
+  if (!Number.isFinite(n)) return fallback
+  return Math.min(max, Math.max(min, n))
 }
 
 // 执行外部命令：必须先经用户确认（拒绝即抛错）。
@@ -618,4 +642,165 @@ export async function pluginExec(
     proc.on('error', (err) => reject(err))
     proc.on('close', (code) => resolve({ code, stdout: stdout.slice(0, 5000), stderr: stderr.slice(0, 5000) }))
   })
+}
+
+// ---- 插件长任务（loom.task）：运行白名单工具，参数直传不经 shell ----
+// 与 pluginExec 的差别：无 30s 硬超时、输出流式回传、可按需取消、超时/输出上限可调。
+// 只能运行应用已核验的工具（Ren'Py SDK / ffmpeg），因此不需要用户确认弹窗。
+
+export type PluginToolName = 'renpy' | 'ffmpeg'
+
+export interface PluginTaskOptions {
+  /** 渲染层预生成的 id：先注册回调再发起调用，避免输出事件早于 id 回来 */
+  id?: string
+  tool: PluginToolName
+  /** 项目根目录（绝对路径）：cwd 校验与默认 cwd 的基准 */
+  projectPath?: string
+  args?: string[]
+  /** 工作目录，相对项目根；缺省为项目根 */
+  cwd?: string
+  timeoutMs?: number
+  maxOutputBytes?: number
+}
+
+export interface PluginTaskEvent {
+  id: string
+  type: 'output' | 'exit'
+  stream?: 'stdout' | 'stderr'
+  chunk?: string
+  code?: number | null
+  signal?: string | null
+  canceled?: boolean
+  timedOut?: boolean
+  error?: string
+}
+
+// 工具解析器由主进程入口注入（SDK 探测 / ffmpeg 按需下载都在 index.ts）
+type ToolResolver = () => Promise<string | null>
+let toolResolvers: { renpy?: ToolResolver; ffmpeg?: ToolResolver } = {}
+
+export function setPluginToolResolvers(r: { renpy?: ToolResolver; ffmpeg?: ToolResolver }): void {
+  toolResolvers = r
+}
+
+const TASK_DEFAULT_TIMEOUT = 5 * 60 * 1000
+const TASK_MAX_TIMEOUT = 30 * 60 * 1000
+const TASK_DEFAULT_MAX_OUTPUT = 256 * 1024
+const TASK_MAX_MAX_OUTPUT = 4 * 1024 * 1024
+const TASK_MAX_ARGS = 512
+// 单个参数长度上限：ffmpeg 的 -filter_complex 滤镜图会作为一个很长的参数传入
+const TASK_MAX_ARG_LEN = 256 * 1024
+const TASK_ID_RE = /^[A-Za-z0-9_-]{1,64}$/
+
+const runningTasks = new Map<string, { kill: () => void; state: { canceled: boolean; timedOut: boolean } }>()
+
+export function pluginTaskCancel(id: string): boolean {
+  const t = runningTasks.get(String(id))
+  if (!t) return false
+  t.state.canceled = true
+  t.kill()
+  return true
+}
+
+// 应用退出时兜底结束所有任务（否则 detached 的子进程会残留）
+export function pluginTaskKillAll(): void {
+  for (const t of [...runningTasks.values()]) {
+    t.state.canceled = true
+    t.kill()
+  }
+}
+
+export async function pluginTaskStart(
+  win: BrowserWindow | null,
+  opts: PluginTaskOptions
+): Promise<{ id: string }> {
+  const tool = opts?.tool
+  if (tool !== 'renpy' && tool !== 'ffmpeg') throw new Error(`不支持的工具: ${String(tool)}`)
+  const resolver = toolResolvers[tool]
+  if (!resolver) throw new Error(`工具不可用: ${tool}`)
+
+  const args = Array.isArray(opts.args) ? opts.args.map((a) => String(a)) : []
+  if (!args.length) throw new Error('缺少命令参数')
+  if (args.length > TASK_MAX_ARGS) throw new Error('参数过多')
+  if (args.some((a) => a.length > TASK_MAX_ARG_LEN || a.includes('\u0000'))) throw new Error('参数不合法')
+
+  const projectPath = typeof opts.projectPath === 'string' && opts.projectPath ? resolve(opts.projectPath) : ''
+  // cwd 相对项目根，且必须仍在项目目录内
+  const cwd = projectPath ? (opts.cwd ? resolveInProject(projectPath, String(opts.cwd)) : projectPath) : undefined
+
+  const file = await resolver()
+  if (!file) throw new Error(tool === 'renpy' ? '未找到 Ren\'Py SDK' : 'ffmpeg 不可用')
+
+  const timeoutMs = clampInt(opts.timeoutMs, TASK_DEFAULT_TIMEOUT, 1000, TASK_MAX_TIMEOUT)
+  const maxOutputBytes = clampInt(opts.maxOutputBytes, TASK_DEFAULT_MAX_OUTPUT, 4096, TASK_MAX_MAX_OUTPUT)
+  const id =
+    typeof opts.id === 'string' && TASK_ID_RE.test(opts.id) ? opts.id : randomUUID()
+
+  const send = (ev: PluginTaskEvent): void => {
+    try {
+      win?.webContents.send('plugins:taskEvent', ev)
+    } catch {
+      /* 窗口已关闭，事件丢弃 */
+    }
+  }
+
+  const isWin = process.platform === 'win32'
+  const proc = spawn(file, args, {
+    cwd,
+    // POSIX 下独立进程组：取消时能连同子进程一起结束
+    detached: !isWin,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+
+  const state = { canceled: false, timedOut: false }
+  const kill = (): void => {
+    const sig = (s: NodeJS.Signals): void => {
+      try {
+        if (!isWin && proc.pid) process.kill(-proc.pid, s)
+        else proc.kill(s)
+      } catch {
+        /* 进程可能已退出 */
+      }
+    }
+    sig('SIGTERM')
+    setTimeout(() => sig('SIGKILL'), 3000).unref?.()
+  }
+
+  const timer = setTimeout(() => {
+    state.timedOut = true
+    kill()
+  }, timeoutMs)
+
+  let outBytes = 0
+  const forward = (stream: 'stdout' | 'stderr', d: Buffer): void => {
+    if (outBytes >= maxOutputBytes) return
+    const chunk = d.toString('utf-8')
+    outBytes += Buffer.byteLength(chunk)
+    send({ id, type: 'output', stream, chunk })
+  }
+  proc.stdout?.on('data', (d: Buffer) => forward('stdout', d))
+  proc.stderr?.on('data', (d: Buffer) => forward('stderr', d))
+
+  let settled = false
+  const finish = (code: number | null, signal: string | null, error?: string): void => {
+    if (settled) return
+    settled = true
+    clearTimeout(timer)
+    runningTasks.delete(id)
+    send({ id, type: 'exit', code, signal, canceled: state.canceled, timedOut: state.timedOut, error })
+  }
+  proc.on('error', (err) => finish(null, null, err.message))
+  proc.on('close', (code, signal) => finish(code, signal))
+
+  runningTasks.set(id, { kill, state })
+  return { id }
+}
+
+// 打开项目内路径（或文件所在目录），返回空字符串表示成功
+export async function pluginShellOpenPath(projectPath: string, subPath: string): Promise<string> {
+  if (!projectPath) return '未打开项目'
+  const target = resolveInProject(projectPath, subPath)
+  const exists = await fs.access(target).then(() => true).catch(() => false)
+  if (!exists) return `路径不存在: ${subPath}`
+  return shell.openPath(target)
 }

@@ -34,6 +34,14 @@ export interface ToastItem {
   type: 'info' | 'success' | 'error'
 }
 
+/** 织机编辑器中当前选中的故事（label） */
+export interface SelectedLabel {
+  file: string
+  name: string
+  line: number
+  endLine: number
+}
+
 export interface HookEntry {
   pluginId: string
   event: string
@@ -60,6 +68,130 @@ interface PluginsState {
 }
 
 let toastSeq = 0
+
+// ---- 插件长任务（loom.task）：后台运行 renpy / ffmpeg，输出流式回传 ----
+export interface PluginTaskResult {
+  id: string
+  ok: boolean
+  code: number | null
+  signal: string | null
+  canceled: boolean
+  timedOut: boolean
+  error?: string
+  output: string
+}
+
+export interface PluginTaskHandle {
+  id: string
+  done: Promise<PluginTaskResult>
+  /** 订阅输出（stdout/stderr 合并回调）；返回取消订阅函数 */
+  onOutput: (fn: (chunk: string, stream: 'stdout' | 'stderr') => void) => () => void
+  cancel: () => void
+  /** 已累计的输出文本 */
+  output: () => string
+}
+
+export interface PluginTaskOptions {
+  tool: 'renpy' | 'ffmpeg'
+  args: string[]
+  cwd?: string
+  timeoutMs?: number
+  maxOutputBytes?: number
+}
+
+interface TaskRecord {
+  id: string
+  handlers: Set<(chunk: string, stream: 'stdout' | 'stderr') => void>
+  output: string
+  exited: boolean
+  resolveDone: (r: PluginTaskResult) => void
+}
+
+const pluginTasks = new Map<string, TaskRecord>()
+const TASK_OUTPUT_KEEP = 512 * 1024
+let taskSeq = 0
+let taskEventsBound = false
+
+// 全局事件只绑定一次：按 id 分发给对应任务
+function ensureTaskEvents(): void {
+  if (taskEventsBound) return
+  taskEventsBound = true
+  window.pupurin.onPluginTaskEvent((ev) => {
+    const rec = pluginTasks.get(ev.id)
+    if (!rec) return
+    if (ev.type === 'output') {
+      const chunk = ev.chunk ?? ''
+      rec.output += chunk
+      if (rec.output.length > TASK_OUTPUT_KEEP) rec.output = rec.output.slice(-TASK_OUTPUT_KEEP)
+      for (const h of rec.handlers) {
+        try {
+          h(chunk, ev.stream ?? 'stdout')
+        } catch {
+          /* 订阅者异常不影响其他订阅者 */
+        }
+      }
+      return
+    }
+    if (rec.exited) return
+    rec.exited = true
+    pluginTasks.delete(ev.id)
+    const canceled = !!ev.canceled
+    const timedOut = !!ev.timedOut
+    rec.resolveDone({
+      id: ev.id,
+      ok: !canceled && !timedOut && !ev.error && ev.code === 0,
+      code: ev.code ?? null,
+      signal: ev.signal ?? null,
+      canceled,
+      timedOut,
+      error: ev.error,
+      output: rec.output,
+    })
+  })
+}
+
+function spawnTask(opts: PluginTaskOptions): PluginTaskHandle {
+  ensureTaskEvents()
+  const projectPath = useStore.getState().currentProject?.path ?? ''
+  const id = `t${Date.now().toString(36)}${(++taskSeq).toString(36)}`
+  let resolveDone!: (r: PluginTaskResult) => void
+  const done = new Promise<PluginTaskResult>((res) => {
+    resolveDone = res
+  })
+  const rec: TaskRecord = { id, handlers: new Set(), output: '', exited: false, resolveDone }
+  pluginTasks.set(id, rec)
+
+  window.pupurin
+    .pluginTaskStart({ ...opts, id, projectPath: projectPath || undefined })
+    .catch((e: unknown) => {
+      if (rec.exited) return
+      rec.exited = true
+      pluginTasks.delete(id)
+      rec.resolveDone({
+        id,
+        ok: false,
+        code: null,
+        signal: null,
+        canceled: false,
+        timedOut: false,
+        error: e instanceof Error ? e.message : String(e),
+        output: rec.output,
+      })
+    })
+
+  return {
+    id,
+    done,
+    onOutput: (fn) => {
+      rec.handlers.add(fn)
+      return () => rec.handlers.delete(fn)
+    },
+    cancel: () => {
+      void window.pupurin.pluginTaskCancel(id)
+    },
+    output: () => rec.output,
+  }
+}
 
 // 插件私有数据缓存（loom.store.get/set 同步读写）
 const pluginDataCache = new Map<string, Record<string, unknown>>()
@@ -154,6 +286,16 @@ function buildLoomApi(
         const src = content ?? useStore.getState().source
         return parseSource(src)
       },
+      // 在织机中打开指定文件并定位到行（插件结果列表「跳转」用）
+      openAt: (file: string, line: number): void => {
+        const st = useStore.getState()
+        st.setActiveView('script')
+        // 行定位依赖图形（块）视图的 focusLine，切过去才能看到滚动效果
+        st.setEditorViewMode('graphical')
+        st.requestNav(file, Math.max(1, Math.floor(line) || 1))
+      },
+      // 当前在织机编辑器中选中的故事（label），未选中时为 null
+      getSelectedLabel: (): SelectedLabel | null => readSelectedLabel(useStore.getState()),
       listFiles: async (subDir = ''): Promise<unknown[]> => {
         const p = getProject()
         if (!p) return []
@@ -193,6 +335,12 @@ function buildLoomApi(
         const p = getProject()
         return p ? window.pupurin.pluginFsList(p.path, subDir) : Promise.resolve([])
       },
+      // 删除项目内文件（清理插件临时注入的文件）；不存在时静默成功
+      remove: (subPath: string): Promise<void> => {
+        const p = getProject()
+        if (!p) return Promise.reject(new Error('未打开项目'))
+        return window.pupurin.pluginFsRemove(p.path, subPath)
+      },
       uploadImage: async (): Promise<{ path: string; name: string; cancelled: boolean }> => {
         // 打开系统选择框，把图片复制到项目 game/gallery/ 并返回 game/ 相对路径
         const p = getProject()
@@ -201,13 +349,69 @@ function buildLoomApi(
       },
     },
     http: {
-      get: (url: string, headers?: Record<string, string>): Promise<{ ok: boolean; status: number; text: string }> =>
-        window.pupurin.pluginHttp('GET', url, undefined, headers),
-      post: (url: string, body?: unknown, headers?: Record<string, string>): Promise<{ ok: boolean; status: number; text: string }> =>
-        window.pupurin.pluginHttp('POST', url, body === undefined ? undefined : JSON.stringify(body), headers),
+      get: (
+        url: string,
+        headers?: Record<string, string>,
+        opts?: { timeoutMs?: number; maxBytes?: number }
+      ): Promise<{ ok: boolean; status: number; text: string }> =>
+        window.pupurin.pluginHttp('GET', url, undefined, headers, opts),
+      post: (
+        url: string,
+        body?: unknown,
+        headers?: Record<string, string>,
+        opts?: { timeoutMs?: number; maxBytes?: number }
+      ): Promise<{ ok: boolean; status: number; text: string }> =>
+        window.pupurin.pluginHttp(
+          'POST',
+          url,
+          body === undefined ? undefined : JSON.stringify(body),
+          headers,
+          opts
+        ),
     },
     exec: (command: string): Promise<{ code: number | null; stdout: string; stderr: string }> =>
       window.pupurin.pluginExec(command),
+    // 长任务：后台运行 Ren'Py / ffmpeg（无 30s 超时，可取消，输出流式回传）
+    task: {
+      spawn: (opts: PluginTaskOptions): PluginTaskHandle => spawnTask(opts),
+      cancel: (id: string): void => {
+        void window.pupurin.pluginTaskCancel(id)
+      },
+    },
+    // ffmpeg：status 只探测不下载，ensure 会在缺失时下载静态构建
+    ffmpeg: {
+      status: async (): Promise<{ available: boolean; path: string; source: 'system' | 'downloaded' | null }> => {
+        const r = await window.pupurin.pluginFfmpegStatus()
+        return { available: !!r.path, path: r.path, source: r.source || null }
+      },
+      ensure: async (
+        onProgress?: (msg: string) => void
+      ): Promise<{ available: boolean; path: string; source: 'system' | 'downloaded' | null }> => {
+        const off = onProgress
+          ? window.pupurin.onPluginFfmpegProgress((m) => {
+              try {
+                onProgress(m)
+              } catch {
+                /* ignore */
+              }
+            })
+          : undefined
+        try {
+          const r = await window.pupurin.pluginFfmpegEnsure()
+          return { available: !!r.path, path: r.path, source: r.source || null }
+        } finally {
+          off?.()
+        }
+      },
+    },
+    shell: {
+      // 打开项目内路径（如导出的视频）；返回空字符串表示成功
+      openPath: (subPath: string): Promise<string> => {
+        const p = getProject()
+        if (!p) return Promise.resolve('未打开项目')
+        return window.pupurin.pluginShellOpenPath(p.path, subPath)
+      },
+    },
   }
 }
 
@@ -325,3 +529,25 @@ export const usePlugins = create<PluginsState>((set, get) => ({
     return () => set((s) => ({ hooks: s.hooks.filter((h) => h !== entry) }))
   },
 }))
+
+// ---- 织机选中故事 → 广播给插件 ----
+// 插件侧边栏据此显示「当前选中故事」的铃光时刻等信息。
+function readSelectedLabel(st: {
+  selectedLabelId: string | null
+  currentFilePath: string
+  labels: Array<{ id: string; name: string; line: number; end_line: number; file?: string }>
+}): SelectedLabel | null {
+  if (!st.selectedLabelId) return null
+  const l = st.labels.find((x) => x.id === st.selectedLabelId)
+  if (!l) return null
+  return { file: l.file || st.currentFilePath, name: l.name, line: l.line, endLine: l.end_line }
+}
+
+let lastSelectedLabelKey = ''
+useStore.subscribe((st) => {
+  const sel = readSelectedLabel(st)
+  const key = sel ? `${sel.file}::${sel.name}` : ''
+  if (key === lastSelectedLabelKey) return
+  lastSelectedLabelKey = key
+  usePlugins.getState().emitHook('editor:labelSelected', sel)
+})

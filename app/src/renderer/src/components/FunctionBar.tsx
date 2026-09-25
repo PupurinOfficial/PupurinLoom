@@ -252,7 +252,7 @@ export default function FunctionBar() {
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto">
             {activeFeature.plugin ? (
-              <div className="p-3">{activeFeature.render()}</div>
+              <div className="p-3 h-full flex flex-col min-h-0">{activeFeature.render()}</div>
             ) : (
               activeFeature.render()
             )}

@@ -47,9 +47,15 @@ import {
   pluginFsRead,
   pluginFsWrite,
   pluginFsList,
+  pluginFsRemove,
   pluginFsUploadImage,
   pluginHttp,
   pluginExec,
+  pluginTaskStart,
+  pluginTaskCancel,
+  pluginTaskKillAll,
+  pluginShellOpenPath,
+  setPluginToolResolvers,
   createPluginFromTemplate,
   openPluginMain,
 } from './pluginManager'
@@ -441,6 +447,8 @@ process.on('SIGHUP', () => {
 app.on('before-quit', () => {
   quitting = true
   backendMgr.stop()
+  // 结束后台长任务（Ren'Py 采集 / ffmpeg 合成），避免 detached 子进程残留
+  pluginTaskKillAll()
 })
 
 // ---- IPC 暴露给渲染层 ----
@@ -1036,6 +1044,160 @@ function downloadWithCurl(url: string, dest: string): Promise<boolean> {
   })
 }
 
+// ---- ffmpeg：优先复用系统已装，其次按需下载静态构建到 userData/tools/ffmpeg ----
+// 用途：铃光时刻插件把「游戏截图 + 宣传文字」合成宣传片。
+
+// 各平台可用的静态构建下载源（按顺序尝试）
+const FFMPEG_SOURCES: Record<string, string[]> = {
+  'darwin-arm64': ['https://ffmpeg.martin-riedl.de/redirect/latest/macos/arm64/release/ffmpeg.zip'],
+  'darwin-x64': [
+    'https://ffmpeg.martin-riedl.de/redirect/latest/macos/amd64/release/ffmpeg.zip',
+    'https://evermeet.cx/ffmpeg/getrelease/zip',
+  ],
+  'win32-x64': [
+    'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip',
+    'https://github.com/GyanD/codexffmpeg/releases/latest/download/ffmpeg-release-essentials.zip',
+  ],
+  'linux-x64': ['https://ffmpeg.martin-riedl.de/redirect/latest/linux/amd64/release/ffmpeg.zip'],
+  'linux-arm64': ['https://ffmpeg.martin-riedl.de/redirect/latest/linux/arm64/release/ffmpeg.zip'],
+}
+
+function ffmpegBinName(): string {
+  return process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'
+}
+
+function ffmpegCachePath(): string {
+  return join(app.getPath('userData'), 'tools', 'ffmpeg', ffmpegBinName())
+}
+
+// 能跑起来才算可用（避免路径存在但二进制损坏 / 架构不匹配）
+function ffmpegWorks(exe: string): boolean {
+  try {
+    const r = spawnSync(exe, ['-version'], { stdio: 'pipe', timeout: 20000 })
+    return r.status === 0 && /ffmpeg version/i.test(String(r.stdout ?? ''))
+  } catch {
+    return false
+  }
+}
+
+// 系统已装的 ffmpeg：先查 PATH，再查常见安装位置
+function findSystemFfmpeg(): string | null {
+  const candidates =
+    process.platform === 'win32'
+      ? ['ffmpeg.exe', 'C:\\ffmpeg\\bin\\ffmpeg.exe']
+      : ['ffmpeg', '/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg', '/usr/bin/ffmpeg']
+  for (const c of candidates) {
+    if (ffmpegWorks(c)) return c
+  }
+  return null
+}
+
+// 解压 zip（macOS/Linux 用 unzip，Windows 用 PowerShell）
+function extractZip(zipPath: string, destDir: string): void {
+  const r =
+    process.platform === 'win32'
+      ? spawnSync(
+          'powershell.exe',
+          [
+            '-NoProfile',
+            '-NonInteractive',
+            '-Command',
+            `Expand-Archive -Force -LiteralPath '${zipPath.replace(/'/g, "''")}' -DestinationPath '${destDir.replace(/'/g, "''")}'`,
+          ],
+          { stdio: 'pipe', timeout: 10 * 60 * 1000 }
+        )
+      : spawnSync('unzip', ['-q', '-o', zipPath, '-d', destDir], { stdio: 'pipe', timeout: 10 * 60 * 1000 })
+  if (r.status !== 0) throw new Error('压缩包解压失败')
+}
+
+// 在解压目录里递归找到 ffmpeg 可执行文件
+async function findFileRecursive(dir: string, name: string, depth = 0): Promise<string | null> {
+  if (depth > 6) return null
+  let entries: import('node:fs').Dirent[]
+  try {
+    entries = await fs.readdir(dir, { withFileTypes: true })
+  } catch {
+    return null
+  }
+  for (const e of entries) {
+    const p = join(dir, e.name)
+    if (e.isDirectory()) {
+      const hit = await findFileRecursive(p, name, depth + 1)
+      if (hit) return hit
+    } else if (e.name === name) {
+      return p
+    }
+  }
+  return null
+}
+
+let ffmpegResolved: { path: string; source: 'system' | 'downloaded' } | null | undefined
+
+// 确保 ffmpeg 可用；返回可执行文件路径与来源，失败返回 null
+async function ensureFfmpeg(log: (s: string) => void = () => {}): Promise<{ path: string; source: 'system' | 'downloaded' } | null> {
+  if (ffmpegResolved !== undefined) return ffmpegResolved
+
+  const cached = ffmpegCachePath()
+  if (ffmpegWorks(cached)) {
+    ffmpegResolved = { path: cached, source: 'downloaded' }
+    return ffmpegResolved
+  }
+
+  const sys = findSystemFfmpeg()
+  if (sys) {
+    log(`已找到系统 ffmpeg: ${sys}`)
+    ffmpegResolved = { path: sys, source: 'system' }
+    return ffmpegResolved
+  }
+
+  const key = `${process.platform}-${process.arch}`
+  const urls = FFMPEG_SOURCES[key]
+  if (!urls || !urls.length) {
+    log(`暂不支持自动下载 ffmpeg（${key}），请手动安装后重试。`)
+    ffmpegResolved = null
+    return null
+  }
+
+  const tmpDir = join(tmpdir(), `loom-ffmpeg-${Date.now()}`)
+  try {
+    let zipPath = ''
+    for (const url of urls) {
+      log(`未检测到 ffmpeg，正在下载静态构建…（${url}）`)
+      const dest = join(tmpdir(), `loom-ffmpeg-${Date.now()}.zip`)
+      if (await downloadWithCurl(url, dest)) {
+        zipPath = dest
+        break
+      }
+    }
+    if (!zipPath) throw new Error('所有下载源均不可达，请检查网络后重试')
+
+    log('下载完成，正在解压…')
+    await fs.rm(tmpDir, { recursive: true, force: true })
+    await fs.mkdir(tmpDir, { recursive: true })
+    extractZip(zipPath, tmpDir)
+    await fs.rm(zipPath, { force: true }).catch(() => undefined)
+
+    const found = await findFileRecursive(tmpDir, ffmpegBinName())
+    if (!found) throw new Error('压缩包内未找到 ffmpeg 可执行文件')
+
+    await fs.mkdir(dirname(cached), { recursive: true })
+    await fs.copyFile(found, cached)
+    await fs.chmod(cached, 0o755).catch(() => undefined)
+    if (!ffmpegWorks(cached)) throw new Error('下载的 ffmpeg 无法运行（架构不匹配或被系统拦截）')
+
+    log('ffmpeg 安装完成')
+    ffmpegResolved = { path: cached, source: 'downloaded' }
+    return ffmpegResolved
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    log(`ffmpeg 自动安装失败: ${msg}`)
+    ffmpegResolved = null
+    return null
+  } finally {
+    await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => undefined)
+  }
+}
+
 // 预下载 Gradle 发行包到 wrapper 缓存。
 // RAPT 的 gradle-wrapper.properties 指向 services.gradle.org（会重定向到 GitHub）。
 // 在国内网络或本地 HTTPS 拦截（如 SteamTools）环境下，Java 常因不信任拦截证书而下载失败
@@ -1499,10 +1661,49 @@ ipcMain.handle('plugins:fsWrite', (_e, projectPath: string, subPath: string, con
   pluginFsWrite(projectPath, subPath, content)
 )
 ipcMain.handle('plugins:fsList', (_e, projectPath: string, subDir: string) => pluginFsList(projectPath, subDir))
+ipcMain.handle('plugins:fsRemove', (_e, projectPath: string, subPath: string) =>
+  pluginFsRemove(projectPath, subPath)
+)
 ipcMain.handle('plugins:uploadImage', (_e, projectPath: string) => pluginFsUploadImage(mainWindow, projectPath))
-ipcMain.handle('plugins:http', (_e, method: string, url: string, body?: string, headers?: Record<string, string>) =>
-  pluginHttp(method, url, body, headers))
+ipcMain.handle(
+  'plugins:http',
+  (
+    _e,
+    method: string,
+    url: string,
+    body?: string,
+    headers?: Record<string, string>,
+    opts?: { timeoutMs?: number; maxBytes?: number }
+  ) => pluginHttp(method, url, body, headers, opts)
+)
 ipcMain.handle('plugins:exec', (_e, command: string) => pluginExec(mainWindow, command))
+// 插件长任务：运行白名单工具（Ren'Py SDK / ffmpeg），流式回传输出、可取消
+ipcMain.handle('plugins:taskStart', (_e, opts) => pluginTaskStart(mainWindow, opts))
+ipcMain.handle('plugins:taskCancel', (_e, id: string) => pluginTaskCancel(id))
+// 工具可用性：ffmpeg 按需获取（进度通过 plugins:ffmpegProgress 推送）
+ipcMain.handle('plugins:ffmpegEnsure', async () => {
+  const log = (s: string): void => {
+    try {
+      mainWindow?.webContents.send('plugins:ffmpegProgress', s)
+    } catch {
+      /* 窗口已关闭 */
+    }
+  }
+  const r = await ensureFfmpeg(log)
+  return r ?? { path: '', source: '' }
+})
+ipcMain.handle('plugins:ffmpegStatus', async () => {
+  const r = await ensureFfmpeg()
+  return r ?? { path: '', source: '' }
+})
+ipcMain.handle('plugins:shellOpenPath', (_e, projectPath: string, subPath: string) =>
+  pluginShellOpenPath(projectPath, subPath)
+)
+// 插件工具解析器：把 SDK 探测与 ffmpeg 获取注入插件宿主
+setPluginToolResolvers({
+  renpy: async () => (await findRenpySdk())?.exe ?? null,
+  ffmpeg: async () => (await ensureFfmpeg())?.path ?? null,
+})
 // 插件商城（链路验证）：拉取索引 / 从 GitHub 仓库 tag 安装
 ipcMain.handle('store:fetchIndex', (_e, indexUrl: string) => fetchStoreIndex(indexUrl))
 ipcMain.handle('store:install', (_e, entry: StorePlugin) => installPluginFromStore(entry))

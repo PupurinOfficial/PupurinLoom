@@ -198,8 +198,11 @@ export default function ScriptEditorPage() {
   useEffect(() => {
     if (!selectedLabelId) return
     const l = labels.find((x) => x.id === selectedLabelId)
-    if (l) setFocusLine({ line: l.line, ts: Date.now() })
-  }, [selectedLabelId, labels])
+    if (!l) return
+    // 已精确跳到该 label 内部的某一行时（插件标记补充定位、跨文件行定位），不要拉回 label 起始行
+    if (focusLine && focusLine.line > l.line && focusLine.line <= l.end_line) return
+    setFocusLine({ line: l.line, ts: Date.now() })
+  }, [selectedLabelId, labels, focusLine])
 
   // 跨文件导航：从右侧场景列表 / 变量反向引用发起，自动切换文件并定位 label
   useEffect(() => {

@@ -77,6 +77,15 @@ const REGISTRY: Record<string, ReactNode> = {
       <path d="M14 18h6" />
     </>
   ),
+  // 铃光时刻：铃铛 + 星芒
+  'pupurin-moments': (
+    <>
+      <path d="M7 16V11a5 5 0 0110 0v5" />
+      <path d="M4.5 16h15" />
+      <path d="M10 19a2 2 0 004 0" />
+      <path d="M18.6 3.6l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7.7-1.8z" />
+    </>
+  ),
 }
 
 function RegistrySvg({ size, className, children }: { size: number; className: string; children: ReactNode }) {

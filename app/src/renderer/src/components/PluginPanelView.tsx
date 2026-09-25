@@ -24,5 +24,6 @@ export default function PluginPanelView({ panel }: { panel: PluginPanel }) {
     }
   }, [panel])
 
-  return <div ref={ref} className="w-full" />
+  // 撑满侧边栏可用高度（插件面板内部自行决定是否用满，如列表滚动）
+  return <div ref={ref} className="w-full flex-1 flex flex-col min-h-0" />
 }

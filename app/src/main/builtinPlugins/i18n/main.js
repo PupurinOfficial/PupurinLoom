@@ -41,6 +41,9 @@
   function saveState(s) {
     loom.store.set(stateKey(), s)
   }
+  // 语句头允许的形式：空（旁白）、角色名/变量名（标识符，可带点）、带引号的角色表达式
+  // 代码行（`x = "…"`、`return a + "…"`、`foo: "…"` 等）一律不像，必须排除——否则会给冷代码行注入 id
+  const SAY_HEAD_RE = /^(?:[\w.]+|"[^"]*")$/
   // 解析单行对话/菜单选项
   function parseSayLine(line) {
     const t = String(line).trim()
@@ -89,10 +92,19 @@
         return { kind: 'say', char: '', text, tail: tail.startsWith('#') ? tail : '', id: existingId }
       return null
     }
+    if (!SAY_HEAD_RE.test(head)) return null
     if (NON_CHAR_KEYWORDS.has(head.toLowerCase())) return null
     // 已有 id 的行其 tail 就是 `id xxx` 子句，放行；否则行尾只能是注释
     if (tail && !tail.startsWith('#') && !existingId) return null
     return { kind: 'say', char: head.replace(/^["']|["']$/g, ''), text, tail: tail.startsWith('#') ? tail : '', id: existingId }
+  }
+  // 会开启一个「不识别对话」的子块：Python / ATL / 屏幕语言 / 样式等
+  function opensNoSayBlock(t) {
+    if (/^init\b[^:]*\bpython\b/.test(t)) return true // init python: / init -1 python:
+    if (/^(python|screen|image|transform|layeredimage|atl|style|translate)\b/.test(t)) return true
+    if (/^init\s*:/.test(t)) return true
+    if (/^(show|scene|hide)\b/.test(t)) return true // show x: 会开启 ATL 块
+    return false
   }
   // 扫描脚本：收集对话单元 + 菜单字符串，并返回「追加了 id 子句」的脚本
   function extractScript(content) {
@@ -100,16 +112,35 @@
     const units = [] // { id, line, char, text }
     const strings = [] // { text }
     const out = []
+    const stack = [] // [{ indent, say }]：缩进块栈；say 表示该块内允许把行识别为对话
     let label = ''
     for (let i = 0; i < lines.length; i++) {
       const raw = lines[i]
-      const lm = raw.match(/^\s*label\s+([\w.]+)\s*(?:hide)?\s*:/)
-      if (lm) {
+      const t = raw.trim()
+      let inSay = false
+      if (t) {
+        const indent = raw.length - raw.replace(/^[ \t]+/, '').length
+        // 先退出已结束的块（非空行缩进回退）
+        while (stack.length && indent <= stack[stack.length - 1].indent) stack.pop()
+        inSay = stack.length ? stack[stack.length - 1].say : false
+        // 行尾冒号（忽略行尾注释）表示开启新块
+        if (/:[ \t]*(?:#.*)?$/.test(t)) {
+          const lm0 = t.match(/^label\s+([\w.]+)\s*(?:hide)?\s*:/)
+          // 只有「顶层」或「本就处于 label 内」的 label 才是真 label；
+          // screen 语言里也有 `label h.who:`（显示对象），不能当成对话块
+          const realLabel = !!lm0 && (stack.length === 0 || inSay)
+          // 真 label 块允许对话；其它块：明确属于代码块的置为不允许，其余继承父块
+          stack.push({ indent, say: realLabel ? true : opensNoSayBlock(t) ? false : inSay })
+        }
+      }
+      const lm = t.match(/^\s*label\s+([\w.]+)\s*(?:hide)?\s*:/)
+      if (lm && (stack.length === 0 || inSay)) {
         label = lm[1]
         out.push(raw)
         continue
       }
-      const info = parseSayLine(raw)
+      // 只在 label（及其内部的控制流块）里识别对话，避免给 ATL / Python / 屏幕行注入 id
+      const info = inSay ? parseSayLine(raw) : null
       if (!info) {
         out.push(raw)
         continue

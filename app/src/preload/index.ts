@@ -188,12 +188,60 @@ const api = {
     ipcRenderer.invoke('plugins:fsWrite', projectPath, subPath, content),
   pluginFsList: (projectPath: string, subDir: string): Promise<Array<{ name: string; isDir: boolean; path: string }>> =>
     ipcRenderer.invoke('plugins:fsList', projectPath, subDir),
+  pluginFsRemove: (projectPath: string, subPath: string): Promise<void> =>
+    ipcRenderer.invoke('plugins:fsRemove', projectPath, subPath),
   pluginFsUploadImage: (projectPath: string): Promise<{ path: string; name: string; cancelled: boolean }> =>
     ipcRenderer.invoke('plugins:uploadImage', projectPath),
-  pluginHttp: (method: string, url: string, body?: string, headers?: Record<string, string>): Promise<{ ok: boolean; status: number; text: string }> =>
-    ipcRenderer.invoke('plugins:http', method, url, body, headers),
+  pluginHttp: (
+    method: string,
+    url: string,
+    body?: string,
+    headers?: Record<string, string>,
+    opts?: { timeoutMs?: number; maxBytes?: number }
+  ): Promise<{ ok: boolean; status: number; text: string }> =>
+    ipcRenderer.invoke('plugins:http', method, url, body, headers, opts),
   pluginExec: (command: string): Promise<{ code: number | null; stdout: string; stderr: string }> =>
     ipcRenderer.invoke('plugins:exec', command),
+  // 插件长任务：白名单工具（renpy / ffmpeg），输出流式回传 + 可取消
+  pluginTaskStart: (opts: {
+    id?: string
+    tool: 'renpy' | 'ffmpeg'
+    projectPath?: string
+    args: string[]
+    cwd?: string
+    timeoutMs?: number
+    maxOutputBytes?: number
+  }): Promise<{ id: string }> => ipcRenderer.invoke('plugins:taskStart', opts),
+  pluginTaskCancel: (id: string): Promise<boolean> => ipcRenderer.invoke('plugins:taskCancel', id),
+  onPluginTaskEvent: (
+    cb: (ev: {
+      id: string
+      type: 'output' | 'exit'
+      stream?: 'stdout' | 'stderr'
+      chunk?: string
+      code?: number | null
+      signal?: string | null
+      canceled?: boolean
+      timedOut?: boolean
+      error?: string
+    }) => void
+  ): (() => void) => {
+    const fn = (_e: unknown, ev: Parameters<typeof cb>[0]): void => cb(ev)
+    ipcRenderer.on('plugins:taskEvent', fn)
+    return () => ipcRenderer.removeListener('plugins:taskEvent', fn)
+  },
+  // 工具可用性：ffmpeg 按需下载（首次约 20-30MB）
+  pluginFfmpegEnsure: (): Promise<{ path: string; source: 'system' | 'downloaded' | '' }> =>
+    ipcRenderer.invoke('plugins:ffmpegEnsure'),
+  pluginFfmpegStatus: (): Promise<{ path: string; source: 'system' | 'downloaded' | '' }> =>
+    ipcRenderer.invoke('plugins:ffmpegStatus'),
+  onPluginFfmpegProgress: (cb: (msg: string) => void): (() => void) => {
+    const fn = (_e: unknown, msg: string): void => cb(msg)
+    ipcRenderer.on('plugins:ffmpegProgress', fn)
+    return () => ipcRenderer.removeListener('plugins:ffmpegProgress', fn)
+  },
+  pluginShellOpenPath: (projectPath: string, subPath: string): Promise<string> =>
+    ipcRenderer.invoke('plugins:shellOpenPath', projectPath, subPath),
   // 插件商城（链路验证）
   storeFetchIndex: (indexUrl: string): Promise<{ ok: boolean; index?: { plugins: StorePlugin[] }; error?: string; stale?: boolean }> =>
     ipcRenderer.invoke('store:fetchIndex', indexUrl),

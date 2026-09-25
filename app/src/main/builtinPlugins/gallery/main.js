@@ -276,6 +276,10 @@
     )
   }
 
+  // 项目所有 .rpy 中 image 语句定义的「图片名 → 文件路径」（仅收集可解析的引号路径）。
+  // 当 gallery.rpy 自身缺少 image 定义（同名 image 已被脚本定义，生成时跳过）时，
+  // 反向同步 / 缩略图空路径恢复都依赖它来补回路径。
+  let imagePaths = new Map()
   // ---------- 已定义图片检测：扫描项目所有 .rpy 中的 image 语句 ----------
   function scanDefinedImages() {
     function walkRpy(dir) {
@@ -300,21 +304,31 @@
             .read('game/' + f)
             .then((content) => {
               const set = new Set()
-              if (!content) return set
+              const paths = new Map()
+              if (!content) return { set, paths }
               content.split(/\r?\n/).forEach((ln) => {
                 const m = /^\s*image\s+(.+?)\s*=\s*/.exec(ln)
-                if (m) {
-                  const name = m[1].trim().replace(/\s+/g, ' ')
-                  if (name) set.add(name)
-                }
+                if (!m) return
+                const name = m[1].trim().replace(/\s+/g, ' ')
+                if (!name) return
+                set.add(name)
+                const pm = /^\s*image\s+.+?\s*=\s*"((?:[^"\\]|\\.)*)"/.exec(ln)
+                if (pm) paths.set(name, pm[1].replace(/\\(["\\])/g, '$1'))
               })
-              return set
+              return { set, paths }
             })
-            .catch(() => new Set())
+            .catch(() => ({ set: new Set(), paths: new Map() }))
         )
-      ).then((sets) => {
+      ).then((results) => {
         const all = new Set()
-        sets.forEach((s) => s.forEach((v) => all.add(v)))
+        const allPaths = new Map()
+        results.forEach((r) => {
+          r.set.forEach((v) => all.add(v))
+          r.paths.forEach((v, k) => {
+            if (!allPaths.has(k)) allPaths.set(k, v)
+          })
+        })
+        imagePaths = allPaths
         return all
       })
     )
@@ -328,6 +342,7 @@
       })
       .catch(() => {
         definedImages = new Set()
+        imagePaths = new Map()
       })
   }
 
@@ -376,12 +391,43 @@
         cur.diffs.push({
           id: 'diff-' + cgs.length + '-' + (cur.diffs.length + 1),
           imgName,
-          path: imgDefs.get(imgName) ?? '',
+          // gallery.rpy 内无对应 image 定义时，回退到全项目已定义 image 的路径
+          path: imgDefs.get(imgName) ?? imagePaths.get(imgName) ?? '',
         })
       }
     }
     if (!/screen\s+gallery\s*\(/.test(String(src)) || cgs.length === 0) return null
     return { columns, cgs }
+  }
+  // 合并解析结果到面板状态：
+  //  - CG / 差分的增删结构以 gallery.rpy（真实代码）为准；
+  //  - 但 diff 的 id 与图片路径以面板为准——文件里缺 image 定义（同名已被脚本
+  //    定义而跳过生成）时解析出的路径为空，绝不能覆盖用户已选的图（否则缩略图黑屏）。
+  function mergeParsedIntoState(s, parsed) {
+    const oldDiffByName = new Map()
+    s.cgs.forEach((cg) => (cg.diffs || []).forEach((d) => oldDiffByName.set(d.imgName, d)))
+    const cgs = parsed.cgs.map((cg) => {
+      const oldCg =
+        s.cgs.find((c) => c.id === cg.id && c.name === cg.name) || s.cgs.find((c) => c.name === cg.name)
+      return {
+        id: oldCg ? oldCg.id : cg.id,
+        name: cg.name,
+        diffs: (cg.diffs || []).map((pd) => {
+          const old = oldDiffByName.get(pd.imgName)
+          if (!old) return pd
+          return { ...pd, id: old.id, path: pd.path || old.path }
+        }),
+      }
+    })
+    // 面板中无差分的新建 CG（尚未配图）在文件里没有对应的 g.button
+    // （generateCode 会过滤空 CG），解析结果不会包含它们。
+    // 合并回来，否则「添加CG」后 400ms 写盘 → app:saved → 同步时会被立刻删掉。
+    const pendingEmpty = (s.cgs || []).filter((cg) => !(cg.diffs && cg.diffs.length > 0))
+    cgs.push(...pendingEmpty)
+    const next = { columns: parsed.columns, cgs }
+    const changed =
+      s.columns !== next.columns || JSON.stringify(s.cgs) !== JSON.stringify(next.cgs)
+    return { next, changed }
   }
   // 读取 game/gallery.rpy 同步到面板状态；内容有变化才提示
   function syncFromCode() {
@@ -392,16 +438,10 @@
         const parsed = parseGalleryCode(src)
         if (!parsed) return
         const s = load()
-        // 面板中无差分的新建 CG（尚未配图）在文件里没有对应的 g.button
-        // （generateCode 会过滤空 CG），解析结果不会包含它们。
-        // 合并回来，否则「添加CG」后 400ms 写盘 → app:saved → 同步时会被立刻删掉。
-        const pendingEmpty = (s.cgs || []).filter((cg) => !(cg.diffs && cg.diffs.length > 0))
-        parsed.cgs = parsed.cgs.concat(pendingEmpty)
-        const changed =
-          s.columns !== parsed.columns || JSON.stringify(s.cgs) !== JSON.stringify(parsed.cgs)
+        const { next, changed } = mergeParsedIntoState(s, parsed)
         if (!changed) return
-        s.columns = parsed.columns
-        s.cgs = parsed.cgs
+        s.columns = next.columns
+        s.cgs = next.cgs
         save(s)
         if (listEl) renderList(listEl)
       })
@@ -409,11 +449,26 @@
   }
 
   // ---------- 缩略图（懒加载 + 缓存）----------
+  // 找不到同路径图片但已确认缺失的 imgName（避免每次渲染都重新全量扫描）
+  const missingThumbs = new Set()
+  // 空路径恢复进行中的 imgName（并发去重）
+  const recoveringThumbs = new Set()
+
   function loadThumb(img) {
     const path = img && img.getAttribute('data-path')
-    if (!path) return
+    const imgName = img && img.getAttribute('data-imgname')
+    if (!path) {
+      // 空路径：优先从全项目 image 定义补，否则按同名图片文件兜底；
+      // 都找不到 → 斜纹占位（替代一团黑色）
+      if (imgName && img.isConnected && !missingThumbs.has(imgName)) recoverThumbPath(img, imgName)
+      else markThumbMissing(img)
+      return
+    }
+    const apply = (url) => {
+      if (url && img.isConnected && img.getAttribute('data-path') === path) img.src = url
+    }
     if (thumbCache.has(path)) {
-      img.src = thumbCache.get(path)
+      apply(thumbCache.get(path))
       return
     }
     loom.project
@@ -421,9 +476,54 @@
       .then((url) => {
         if (!url) return
         thumbCache.set(path, url)
-        if (img.getAttribute('data-path') === path) img.src = url
+        apply(url)
       })
-      .catch(() => {})
+      .catch(() => markThumbMissing(img))
+  }
+
+  // 空路径：从已定义的 image 语句 / 项目内同名图片文件补齐路径并写回 store
+  function recoverThumbPath(img, imgName) {
+    const defined = imagePaths && imagePaths.get(imgName)
+    if (defined) {
+      bindDiffPath(img, imgName, defined)
+      return
+    }
+    if (recoveringThumbs.has(imgName)) return
+    recoveringThumbs.add(imgName)
+    scanImages()
+      .then((list) => {
+        const hit = list.find((f) => f.name.replace(/\.[^.]+$/, '') === imgName)
+        if (hit) bindDiffPath(img, imgName, hit.path)
+        else {
+          missingThumbs.add(imgName)
+          markThumbMissing(img)
+        }
+      })
+      .catch(() => markThumbMissing(img))
+      .finally(() => recoveringThumbs.delete(imgName))
+  }
+
+  // 把补齐的路径写回对应差分（仅当它当前仍为空），并让缩略图立即显示
+  function bindDiffPath(img, imgName, path) {
+    const cgCard = img.closest('.gal-cg')
+    const s = load()
+    const cg = cgCard ? s.cgs.find((c) => c.id === cgCard.getAttribute('data-id')) : null
+    if (cg) {
+      const diffRow = img.closest('.gal-diff')
+      const d = diffRow
+        ? cg.diffs.find((x) => x.id === diffRow.getAttribute('data-id'))
+        : cg.diffs[0]
+      if (d && !d.path && d.imgName === imgName) {
+        d.path = path
+        save(s)
+      }
+    }
+    img.setAttribute('data-path', path)
+    loadThumb(img)
+  }
+
+  function markThumbMissing(img) {
+    if (img && img.isConnected) img.classList.add('gal-thumb-missing')
   }
 
   // ---------- 模态框 ----------
@@ -574,6 +674,7 @@
     '.gal-cg-head{display:flex;align-items:center;gap:6px;padding:5px 6px;cursor:pointer;user-select:none}' +
     '.gal-cg-head:hover{background:rgb(var(--loom-panel2))}' +
     '.gal-thumb{width:34px;height:34px;object-fit:cover;border-radius:5px;border:1px solid rgb(var(--loom-border));background:rgb(var(--loom-bg));flex-shrink:0}' +
+    '.gal-thumb.gal-thumb-missing{background:repeating-linear-gradient(45deg,rgb(var(--loom-border)/.55),rgb(var(--loom-border)/.55) 4px,rgb(var(--loom-bg)) 4px,rgb(var(--loom-bg)) 8px)}' +
     '.gal-cg-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}' +
     '.gal-badge{flex-shrink:0;font-size:10px;color:rgb(var(--loom-muted));background:rgb(var(--loom-panel2));border:1px solid rgb(var(--loom-border));border-radius:9px;padding:1px 6px}' +
     '.gal-ops{display:flex;gap:1px;flex-shrink:0}' +
@@ -637,6 +738,8 @@
         html +=
           '<img class="gal-thumb" data-path="' +
           esc(first ? first.path : '') +
+          '" data-imgname="' +
+          esc(first ? first.imgName : '') +
           '" alt="" />'
         html += '<span class="gal-cg-name" data-role="name">' + esc(cg.name) + '</span>'
         html += '<span class="gal-badge">' + cg.diffs.length + '</span>'
@@ -658,7 +761,12 @@
           html += '<div class="gal-diffs">'
           cg.diffs.forEach((d, di) => {
             html += '<div class="gal-diff" data-id="' + esc(d.id) + '">'
-            html += '<img class="gal-thumb" data-path="' + esc(d.path) + '" alt="" />'
+            html +=
+              '<img class="gal-thumb" data-path="' +
+              esc(d.path) +
+              '" data-imgname="' +
+              esc(d.imgName) +
+              '" alt="" />'
             html += '<span class="gal-diff-name" data-role="diffname" title="' + esc(d.path) + '">' + esc(d.imgName) + '</span>'
             if (definedImages && definedImages.has(d.imgName)) {
               html += '<span class="gal-flag" title="项目脚本中已有 image 语句定义该画面，保存时不再重复生成">已定义</span>'
@@ -849,10 +957,10 @@
     })
 
     renderList(listEl)
-    // 挂载后：先同步真实代码（gallery.rpy），再检测已定义图片刷新「已定义」标记，
-    // 然后确保导航中有「画廊」入口（否则游戏中没有进画廊的按钮）
-    syncFromCode()
-      .then(() => refreshDefined())
+    // 挂载后：先检测已定义图片（收集 image 路径供反向同步补路径），再同步真实代码
+    // （gallery.rpy），然后确保导航中有「画廊」入口（否则游戏中没有进画廊的按钮）
+    refreshDefined()
+      .then(() => syncFromCode())
       .then(ensureNavEntryForProject)
   }
 
@@ -892,15 +1000,15 @@
   // 注意：必须在插件注册顶层绑定（不能放在 mount 里），
   // 否则用户没打开过画廊面板时钩子不生效，入口永远不会注入。
   loom.hooks.on('app:projectOpened', () => {
-    syncFromCode()
-      .then(() => refreshDefined())
+    refreshDefined()
+      .then(() => syncFromCode())
       .then(ensureNavEntryForProject)
   })
   // 在代码编辑器中直接修改并保存 gallery.rpy 时，实时同步面板
   loom.hooks.on('app:saved', (payload) => {
     const file = payload && payload.file
     if (file && /(^|[\\/])gallery\.rpy$/i.test(String(file))) {
-      syncFromCode().then(() => refreshDefined())
+      refreshDefined().then(() => syncFromCode())
     }
   })
 
