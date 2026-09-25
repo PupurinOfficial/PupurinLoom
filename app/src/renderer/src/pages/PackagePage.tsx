@@ -404,6 +404,11 @@ export default function PackagePage() {
                                 <li>%USERPROFILE%\RenPy\renpy-8.5.2-sdk\renpy.exe</li>
                                 <li>C:\RenPy\renpy-8.5.2-sdk\renpy.exe</li>
                               </>
+                            ) : sdk?.platform === 'linux' ? (
+                              <>
+                                <li>~/RenPy/renpy-8.5.2-sdk/renpy.sh</li>
+                                <li>~/Downloads/renpy-8.5.2-sdk/renpy.sh</li>
+                              </>
                             ) : (
                               <>
                                 <li>/Applications/renpy-8.5.2-sdk/renpy.app</li>
@@ -491,7 +496,7 @@ export default function PackagePage() {
                           </div>
 
                           {/* macOS 文件权限（Operation not permitted） */}
-                          {!sdk?.sdkWritable && (
+                          {!sdk?.sdkWritable && sdk?.platform === 'darwin' && (
                             <div className="rounded bg-loom-bg border border-loom-err/30 p-3">
                               <p className="text-[11px] font-semibold text-loom-err">macOS 文件权限（Operation not permitted）</p>
                               <p className="mt-1 text-[11px] text-loom-muted/80 leading-relaxed">
@@ -511,6 +516,25 @@ export default function PackagePage() {
                                 >
                                   打开系统设置
                                 </button>
+                                <button
+                                  onClick={() => void checkSdk()}
+                                  className="px-3 py-1.5 rounded border border-loom-border text-[11px] text-loom-muted hover:text-loom-text hover:border-loom-accent/50 transition-colors"
+                                >
+                                  重新检测
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                          {/* 非 macOS：SDK 目录只读（多见于装在 /opt 等系统目录） */}
+                          {!sdk?.sdkWritable && sdk?.platform !== 'darwin' && (
+                            <div className="rounded bg-loom-bg border border-loom-err/30 p-3">
+                              <p className="text-[11px] font-semibold text-loom-err">SDK 目录不可写</p>
+                              <p className="mt-1 text-[11px] text-loom-muted/80 leading-relaxed">
+                                Android 打包需要把编译中间文件写入 Ren'Py SDK 目录。当前目录不可写（常见于把 SDK 放在
+                                <code className="font-mono"> /opt</code> 等系统目录）。请把 SDK 放到用户目录（如
+                                <code className="font-mono"> ~/RenPy</code>），或修正目录属主/权限后重新检测。
+                              </p>
+                              <div className="flex gap-2 mt-2.5">
                                 <button
                                   onClick={() => void checkSdk()}
                                   className="px-3 py-1.5 rounded border border-loom-border text-[11px] text-loom-muted hover:text-loom-text hover:border-loom-accent/50 transition-colors"

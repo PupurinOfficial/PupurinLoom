@@ -49,6 +49,27 @@ win:
     - from: python/dist/pupurin-backend.exe
       to: bin/pupurin-backend.exe
 
+# Linux 平台
+linux:
+  target:
+    - target: AppImage
+    - target: deb
+  category: Development
+  icon: build/icon.png
+  # 可执行文件与 deb 包名固定用 ASCII：productName 含「°」等非 ASCII 字符，
+  # 做二进制名/desktop 文件名都很别扭
+  executableName: pupurin-loom
+  packageName: pupurin-loom
+  maintainer: 仆仆铃°工作室 <https://space.bilibili.com/3546379813129005>
+  # 产物名用 ASCII：productName 里的非 ASCII 字符在上传 GitHub Release 时会被抹掉
+  # （历史上 dmg/exe 就变成了「-0.5.0.dmg」），而 AppImage 还需要 chmod +x，
+  # 文件名以「-」开头在终端里很别扭
+  artifactName: "PupurinLoom-${version}.${ext}"
+  extraResources:
+    # Python 后端可执行文件（PyInstaller 单文件，Linux）
+    - from: python/dist/pupurin-backend
+      to: bin/pupurin-backend
+
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true

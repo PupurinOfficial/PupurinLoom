@@ -745,7 +745,10 @@ export async function pluginTaskStart(
   }
 
   const isWin = process.platform === 'win32'
-  const proc = spawn(file, args, {
+  // POSIX 下的 .sh 入口（如 Ren'Py SDK 的 renpy.sh）交给 /bin/sh 执行：
+  // 压缩包解压后可能丢失可执行位，直接 spawn 会 EACCES
+  const useSh = !isWin && file.endsWith('.sh')
+  const proc = spawn(useSh ? '/bin/sh' : file, useSh ? [file, ...args] : args, {
     cwd,
     // POSIX 下独立进程组：取消时能连同子进程一起结束
     detached: !isWin,

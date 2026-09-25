@@ -267,7 +267,7 @@ export default function SettingsDialog({ open, onClose }: Props) {
               </button>
             </div>
             <p className="text-[11px] text-loom-muted/70 mt-1">
-              选择 Ren'Py SDK 根目录（macOS 含 renpy.app，Windows 含 renpy.exe），用于运行与打包游戏
+              选择 Ren'Py SDK 根目录（macOS 含 renpy.app，Windows 含 renpy.exe，Linux 含 renpy.sh），用于运行与打包游戏
             </p>
             {sdkErr && (
               <div className="mt-1 px-3 py-2 rounded bg-loom-err/15 border border-loom-err/40 text-loom-err text-xs">

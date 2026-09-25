@@ -3,7 +3,7 @@ import { join, resolve, extname, basename, dirname } from 'node:path'
 import { promises as fs } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { tmpdir, homedir } from 'node:os'
-import { spawn, spawnSync } from 'node:child_process'
+import { spawn, spawnSync, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { createServer } from 'node:http'
 import { BackendManager } from './pythonBridge'
 import { buildApplicationMenu, setViewMenu } from './menu'
@@ -94,17 +94,62 @@ function sendCompletionNotification(title: string, body: string): void {
   }
 }
 
+// Ren'Py SDK 的入口随平台而异（官方 SDK 压缩包同时含三套入口，用户无需换 SDK）：
+//   Windows  renpy.exe
+//   macOS    renpy.app/Contents/MacOS/renpy
+//   Linux    renpy.sh（shell 脚本，需交给 /bin/sh 执行）
+interface RenpyLayout {
+  /** SDK 根目录下的标记：存在即说明选中的是 SDK 根目录 */
+  marker: string
+  /** 由 SDK 根目录推出入口路径 */
+  entry: (root: string) => string
+  /** 入口 + 参数 → 实际 spawn 的命令 */
+  command: (entry: string, args: string[]) => { file: string; args: string[] }
+}
+
+function renpyLayout(): RenpyLayout {
+  if (process.platform === 'win32') {
+    return {
+      marker: 'renpy.exe',
+      entry: (root) => join(root, 'renpy.exe'),
+      command: (entry, args) => ({ file: entry, args }),
+    }
+  }
+  if (process.platform === 'darwin') {
+    return {
+      marker: 'renpy.app',
+      entry: (root) => join(root, 'renpy.app', 'Contents', 'MacOS', 'renpy'),
+      command: (entry, args) => ({ file: entry, args }),
+    }
+  }
+  return {
+    marker: 'renpy.sh',
+    entry: (root) => join(root, 'renpy.sh'),
+    // renpy.sh 交给 /bin/sh 执行：解压后丢失可执行位时也不会 EACCES。
+    // 非 .sh 的其他命令（如 Android 分支之外的 xcodebuild）保持原样
+    command: (entry, args) =>
+      entry.endsWith('.sh') ? { file: '/bin/sh', args: [entry, ...args] } : { file: entry, args },
+  }
+}
+
+// 启动 Ren'Py 进程（统一处理各平台入口的调用方式；非 Ren'Py 的普通命令按原样执行）
+function spawnRenpy(entry: string, args: string[], opts: SpawnOptions): ChildProcess {
+  const cmd = renpyLayout().command(entry, args)
+  return spawn(cmd.file, cmd.args, opts)
+}
+
 // 检测 Ren'Py SDK，返回可执行文件路径和 SDK 根目录
 async function findRenpySdk(): Promise<{ exe: string; sdkDir: string } | null> {
   const home = app.getPath('home')
   const isWin = process.platform === 'win32'
+  const layout = renpyLayout()
 
   // 优先使用设置中手动指定的 SDK 目录（设置页可配置）
   try {
     const s = await readSettings()
     const manual = typeof s.sdkPath === 'string' ? s.sdkPath.trim() : ''
     if (manual) {
-      const exe = isWin ? join(manual, 'renpy.exe') : join(manual, 'renpy.app', 'Contents', 'MacOS', 'renpy')
+      const exe = layout.entry(manual)
       try {
         await fs.access(exe)
         return { exe, sdkDir: manual }
@@ -116,10 +161,12 @@ async function findRenpySdk(): Promise<{ exe: string; sdkDir: string } | null> {
     /* 读取设置失败时继续自动检测 */
   }
 
-  // 常见安装位置（macOS: /Applications；Windows: 用户目录 RenPy/ 或 C:\RenPy）
+  // 常见安装位置
   const roots = isWin
     ? [join(home, 'RenPy'), 'C:\\RenPy', join(home, 'Downloads')]
-    : ['/Applications', join(home, 'Applications')]
+    : process.platform === 'darwin'
+      ? ['/Applications', join(home, 'Applications'), join(home, 'RenPy'), join(home, 'Downloads')]
+      : [join(home, 'RenPy'), join(home, 'Downloads'), '/opt', '/usr/local']
 
   // 各 SDK 版本目录名
   const sdkNames = [
@@ -132,29 +179,16 @@ async function findRenpySdk(): Promise<{ exe: string; sdkDir: string } | null> {
     'renpy-sdk',
   ]
 
-  const candidates: string[] = []
   for (const root of roots) {
     for (const name of sdkNames) {
-      candidates.push(join(root, name))
-    }
-  }
-
-  for (const p of candidates) {
-    try {
-      if (isWin) {
-        const exe = join(p, 'renpy.exe')
+      const sdkDir = join(root, name)
+      const exe = layout.entry(sdkDir)
+      try {
         await fs.access(exe)
-        return { exe, sdkDir: p }
-      } else {
-        const renpyApp = join(p, 'renpy.app')
-        await fs.access(renpyApp)
-        return {
-          exe: join(p, 'renpy.app', 'Contents', 'MacOS', 'renpy'),
-          sdkDir: p,
-        }
+        return { exe, sdkDir }
+      } catch {
+        continue
       }
-    } catch {
-      continue
     }
   }
 
@@ -175,7 +209,7 @@ async function runRenpyGame(projectPath: string): Promise<{ success: boolean; er
   }
 
   return new Promise((resolve) => {
-    const proc = spawn(sdk.exe, [projectPath], {
+    const proc = spawnRenpy(sdk.exe, [projectPath], {
       detached: true,
       stdio: 'ignore',
     })
@@ -588,7 +622,7 @@ ipcMain.handle('projects:packageGame', async (_e, projectPath: string, platform:
 
     try {
       // stdio 忽略 stdin：避免 Ren'Py 在异常时等待键盘输入（如 "Press Enter"）导致打包无限挂起
-      const child = spawn(sdk.exe, args, {
+      const child = spawnRenpy(sdk.exe, args, {
         cwd: sdkDir,
         stdio: ['ignore', 'pipe', 'pipe'],
         detached: true,
@@ -1478,7 +1512,7 @@ ipcMain.handle('projects:packageMobile', async (_e, projectPath: string, opts: {
     // 统一的「运行构建命令并等待完成」逻辑：日志收集 + 超时强杀 + 退出码上报
     const runBuild = (cmd: string, args: string[], cwd: string, stepName: string, timeoutMs: number): Promise<void> =>
       new Promise<void>((resolvePromise, reject) => {
-        const child = spawn(cmd, args, {
+        const child = spawnRenpy(cmd, args, {
           cwd,
           stdio: ['ignore', 'pipe', 'pipe'],
           detached: true,
@@ -1633,12 +1667,11 @@ ipcMain.handle('settings:set', async (_e, key: string, value: unknown) => {
   const s = await readSettings()
   // sdkPath 需要校验：指向的目录必须包含可用的 Ren'Py SDK 可执行文件
   if (key === 'sdkPath' && typeof value === 'string' && value.trim()) {
-    const isWin = process.platform === 'win32'
-    const exe = isWin ? join(value, 'renpy.exe') : join(value, 'renpy.app', 'Contents', 'MacOS', 'renpy')
+    const layout = renpyLayout()
     try {
-      await fs.access(exe)
+      await fs.access(layout.entry(value))
     } catch {
-      throw new Error('SDK 目录无效：未找到 ' + (isWin ? 'renpy.exe' : 'renpy.app') + '，请选择 Ren\'Py SDK 根目录')
+      throw new Error(`SDK 目录无效：未找到 ${layout.marker}，请选择 Ren'Py SDK 根目录`)
     }
   }
   s[key] = value

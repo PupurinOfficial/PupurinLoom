@@ -29,7 +29,7 @@ const releasesUrl = site.urls.releases
             <Icon name="download" size={22} />
             <span class="dl-btn-main">
               <span class="dl-btn-label" id="dl-btn-label">下载 macOS 版</span>
-              <span class="dl-btn-ver" id="dl-btn-ver">v0.5.0</span>
+              <span class="dl-btn-ver" id="dl-btn-ver">v0.5.1</span>
             </span>
           </a>
           <div class="ver-picker" id="ver-picker">
@@ -41,6 +41,7 @@ const releasesUrl = site.urls.releases
               <div class="ver-tabs" role="group" aria-label="platform">
                 <button type="button" class="ver-tab" data-os="mac">macOS</button>
                 <button type="button" class="ver-tab" data-os="win">Windows</button>
+                <button type="button" class="ver-tab" data-os="linux">Linux</button>
               </div>
               <ul class="ver-list" id="ver-list"></ul>
               <a class="ver-all" href={releasesUrl} target="_blank" rel="noopener">
@@ -95,16 +96,24 @@ const releasesUrl = site.urls.releases
   const MIRROR = 'https://ghfast.top/'
   // API 不可达时的兜底数据（与当前最新 Release 保持一致，可手工更新）
   const FALLBACK = {
-    tag: 'v0.5.0',
+    tag: 'v0.5.1',
     date: '2026-09-25',
     assets: [
       {
-        name: '-0.5.0.dmg',
-        url: `https://github.com/${REPO}/releases/download/v0.5.0/-0.5.0.dmg`,
+        name: '-0.5.1.dmg',
+        url: `https://github.com/${REPO}/releases/download/v0.5.1/-0.5.1.dmg`,
       },
       {
-        name: '-0.5.0-setup.exe',
-        url: `https://github.com/${REPO}/releases/download/v0.5.0/-0.5.0-setup.exe`,
+        name: '-0.5.1-setup.exe',
+        url: `https://github.com/${REPO}/releases/download/v0.5.1/-0.5.1-setup.exe`,
+      },
+      {
+        name: 'PupurinLoom-0.5.1.AppImage',
+        url: `https://github.com/${REPO}/releases/download/v0.5.1/PupurinLoom-0.5.1.AppImage`,
+      },
+      {
+        name: 'PupurinLoom-0.5.1.deb',
+        url: `https://github.com/${REPO}/releases/download/v0.5.1/PupurinLoom-0.5.1.deb`,
       },
     ],
   }
@@ -138,7 +147,8 @@ const releasesUrl = site.urls.releases
   let list: Rel[] = []
   let source: 'github' | 'mirror' = 'github'
   // 下拉框中默认展示的平台（大按钮仍按访客系统自动识别）
-  let dropOs: 'mac' | 'win' = detectOs() === 'win' ? 'win' : 'mac'
+  let dropOs: 'mac' | 'win' | 'linux' =
+    detectOs() === 'win' ? 'win' : detectOs() === 'linux' ? 'linux' : 'mac'
 
   function pickAsset(rel: Rel | null, os: string) {
     if (!rel || !rel.assets?.length) return null
@@ -149,6 +159,13 @@ const releasesUrl = site.urls.releases
       return (
         rel.assets.find((a) => a.name.toLowerCase().endsWith('.exe')) ||
         rel.assets.find((a) => a.name.toLowerCase().endsWith('.msi')) ||
+        null
+      )
+    }
+    if (os === 'linux') {
+      return (
+        rel.assets.find((a) => a.name.toLowerCase().endsWith('.appimage')) ||
+        rel.assets.find((a) => a.name.toLowerCase().endsWith('.deb')) ||
         null
       )
     }
@@ -220,15 +237,18 @@ const releasesUrl = site.urls.releases
     })
   }
 
-  // ---------- 下拉框平台切换（macOS / Windows） ----------
+  // ---------- 下拉框平台切换（macOS / Windows / Linux） ----------
   const dropTabs = Array.from(document.querySelectorAll<HTMLButtonElement>('.ver-tab'))
-  function setDropOs(os: 'mac' | 'win') {
+  function setDropOs(os: 'mac' | 'win' | 'linux') {
     dropOs = os
     dropTabs.forEach((b) => b.classList.toggle('is-active', b.dataset.os === os))
     refreshHrefs()
   }
   dropTabs.forEach((tab) => {
-    tab.addEventListener('click', () => setDropOs(tab.dataset.os === 'win' ? 'win' : 'mac'))
+    tab.addEventListener('click', () => {
+      const os = tab.dataset.os
+      setDropOs(os === 'win' ? 'win' : os === 'linux' ? 'linux' : 'mac')
+    })
   })
   setDropOs(dropOs)
 
@@ -256,6 +276,9 @@ const releasesUrl = site.urls.releases
     } else if (os === 'win') {
       labelKey = 'download.btnWin'
       metaKey = 'download.meta.win'
+    } else if (os === 'linux') {
+      labelKey = 'download.btnLinux'
+      metaKey = 'download.meta.linux'
     } else {
       labelKey = 'download.btnAll'
       metaKey = 'download.meta.other'
