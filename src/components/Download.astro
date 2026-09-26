@@ -92,8 +92,9 @@ const releasesUrl = site.urls.releases
 
   const REPO = 'PupurinOfficial/PupurinLoom'
   const API = `https://api.github.com/repos/${REPO}/releases`
-  // 国内镜像前缀：加速 GitHub Releases 直链下载（格式为“前缀 + 原 github 直链”），可随时替换
-  const MIRROR = 'https://ghfast.top/'
+  // 国内镜像前缀：加速 GitHub Releases 直链下载（格式为“前缀 + 原 github 直链”）。
+  // 这类公益镜像站点会不定期失效（ghfast.top、ghproxy.cc 等已不可用），失效时换一个即可
+  const MIRROR = 'https://gh-proxy.com/'
   // API 不可达时的兜底数据（与当前最新 Release 保持一致，可手工更新）
   const FALLBACK = {
     tag: 'v0.5.1',
