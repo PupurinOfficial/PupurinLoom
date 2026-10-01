@@ -1,16 +1,42 @@
 // 官网 i18n 词典：zh 由 config.ts 派生（保证与静态渲染一致），en 手工维护。
 // 运行时由 src/scripts/i18n.ts 通过 [data-i18n] 属性切换文案。
-import { site, nav, features, steps, downloadSlides } from './config'
+import { site, nav, features, steps, downloadSlides, paths, storyBlocks } from './config'
 
 export type Lang = 'zh' | 'en'
 
 const zh: Record<string, string> = {
-  // 导航
+  // Hero
+  'hero.title': '以言为线，铃织成篇',
+  'hero.sub': '面向 Ren\'Py 的可视化创作工具 —— 零代码上手，图形 / 代码双模式实时同步，从剧本到打包发布一步到位。',
   'hero.download': '立即下载',
+  'hero.tryDemo': '体验编辑器',
   'hero.guide': '快速上手',
+  // 受众定位
+  'paths.title': '谁为织者？',
+  'paths.sub': '写给个人与同人创作者的轻量舞台 —— 一人、一晚、一个小故事，也能织成一部完整作品。',
   // 特性区
   'features.title': '特性',
   'features.sub': '围绕 Ren\'Py 剧本创作打造的完整工作台 —— 从剧情编排到打包发行。',
+  'features.more': '全部能力清单',
+  // 在线体验（织机° 图形视图演示）
+  'demo.title': '左边织故事，右边立刻玩',
+  'demo.sub': '左侧复刻了织机° 的「图形」视图 —— 点击场景块查看内容，按「运行」后右侧实时播放剧情，选项决定走向。',
+  'demo.restart': '重新开始',
+  'demo.tip': '点击对白继续，选项决定剧情走向。',
+  'demo.playTitle': '试玩预览',
+  'demo.run': '运行',
+  'demo.ready': '点击「运行」，右侧开始播放这一段。',
+  'demo.modeGraph': '图形',
+  'demo.modeCode': '代码',
+  'demo.codeHint': '网页版仅提供图形视图',
+  'demo.panelStart': '剧本入口 —— 从这里开始。',
+  'demo.panelEnd': '故事结尾 —— 再次「运行」可重播。',
+  'demo.node.start': '开始',
+  'demo.node.say': '对白',
+  'demo.node.choice': '选项',
+  'demo.node.branchA': '去校园',
+  'demo.node.branchB': '留在家',
+  'demo.node.end': '结尾',
   // 下载区
   'download.title': '故事以此为始',
   'download.sub': '下载铃言织机°，轻松上手制作Galgame。',
@@ -49,7 +75,6 @@ nav.forEach((n) => {
   zh[`nav.${n.id}`] = n.label
 })
 zh['site.name'] = site.name
-zh['hero.slogan'] = `「${site.slogan}」`
 zh['hero.desc'] = site.description
 zh['about.p1'] = `${site.name}（${site.nameEn}）是仆仆铃°工作室出品的可视化 Ren'Py 开发工具，以「${site.slogan}」为理念，希望让文字冒险游戏的创作像织布一样从容。`
 zh['about.p2'] = `项目以 ${site.license} 开源，代码与发行版均托管在 GitHub；插件生态经由独立仓库维护，欢迎任何人提交插件。`
@@ -67,6 +92,18 @@ downloadSlides.forEach((s, i) => {
   zh[`download.slide.${i}.desc`] = s.desc
   if (s.extra) zh[`download.slide.${i}.extra`] = s.extra
 })
+paths.forEach((p, i) => {
+  zh[`path.${i}.title`] = p.title
+  zh[`path.${i}.desc`] = p.desc
+  zh[`path.${i}.cta`] = p.cta
+})
+storyBlocks.forEach((s, i) => {
+  zh[`story.${i}.title`] = s.title
+  zh[`story.${i}.desc`] = s.desc
+  s.bullets.forEach((b, j) => {
+    zh[`story.${i}.b${j}`] = b
+  })
+})
 
 const en: Record<string, string> = {
   // 产品名：英文下译为 Pupurin° Loom
@@ -77,15 +114,71 @@ const en: Record<string, string> = {
   'nav.plugins': 'Plugins',
   'nav.guide': 'Quick Start',
   'nav.about': 'About',
+  'nav.demo': 'Interactive Editor',
   // Hero
-  'hero.slogan': '「Pupurin spins, stories begin.」',
+  'hero.title': 'Pupurin spins, stories begin.',
+  'hero.sub':
+    "A visual creation tool built on Ren'Py. Zero-code to start, graph/code dual mode in real time — from script to shipped build in one place.",
   'hero.desc': "Visual Ren'Py development tool · A Pupurin° Project",
   'hero.download': 'Download',
+  'hero.tryDemo': 'Try the Editor',
   'hero.guide': 'Quick Start',
+  // 受众定位
+  'paths.title': 'Who is the weaver?',
+  'paths.sub':
+    'A lightweight stage for individual and fan creators — one person, one evening, one small story can still become a complete work.',
+  'path.0.title': 'New to making Galgames',
+  'path.0.desc':
+    'Zero code to start: open Loom°, drag out nodes on the canvas, and your first dialogue runs before your eyes.',
+  'path.0.cta': 'Download',
+  'path.1.title': 'Making fan works for favorite characters',
+  'path.1.desc':
+    'Fan shorts, daily vignettes, beloved ships — no code needed to weave them into playable mini-stories.',
+  'path.1.cta': 'Download',
+  'path.2.title': 'Writing multi-character, multi-route stories',
+  'path.2.desc':
+    'Sprite definitions sync to the script automatically, cross-file jumps at a glance — one person can handle ensemble casts and branches.',
+  'path.2.cta': 'See Features',
   // 特性区
   'features.title': 'Features',
   'features.sub':
     'A complete workbench for crafting Ren\'Py stories — from plot design to packaging and release.',
+  'features.more': 'Full capability list',
+  'story.0.title': 'Write the story',
+  'story.0.desc': 'From the first line of dialogue — the canvas and code mode stay in sync.',
+  'story.0.b0': 'Drag and drop plot nodes; label jumps resolve across files',
+  'story.0.b1': 'Character and sprite definitions sync to script.rpy automatically',
+  'story.0.b2': 'Cross-file parsing catches dangling references and bad conditionals early',
+  'story.1.title': 'Design the interface',
+  'story.1.desc': 'Every UI the player sees can be redefined inside Loom°.',
+  'story.1.b0': 'UI designer for dialogue boxes and menus, visually',
+  'story.1.b1': 'Drag-and-drop assets, batch rename, script references updated',
+  'story.1.b2': "Built-in Ren'Py ASCII naming validation to avoid platform issues",
+  'story.2.title': 'Deliver & publish',
+  'story.2.desc': 'Localization review, variable stats, and packaging all in one workspace.',
+  'story.2.b0': "Integrated Ren'Py SDK — one-click distributable builds",
+  'story.2.b1': 'Local Python backend — scripts and data never leave your machine',
+  'story.2.b2': 'Plugin system: commands, panels, event hooks, and a growing ecosystem',
+  // 在线体验（织机° 图形视图演示）
+  'demo.title': 'Edit on the left, play on the right',
+  'demo.sub':
+    'The left side re-creates the "Graph" view of Loom° — click a block to inspect it, press Run to play on the right; choices change the route.',
+  'demo.restart': 'Restart',
+  'demo.tip': 'Click to continue — choices change the story.',
+  'demo.playTitle': 'Play Preview',
+  'demo.run': 'Run',
+  'demo.ready': 'Press Run — this scene starts playing on the right.',
+  'demo.modeGraph': 'Graph',
+  'demo.modeCode': 'Code',
+  'demo.codeHint': 'Web version: Graph view only',
+  'demo.panelStart': 'Script entry — start here.',
+  'demo.panelEnd': 'The end — press Run again to replay.',
+  'demo.node.start': 'Start',
+  'demo.node.say': 'Dialogue',
+  'demo.node.choice': 'Choice',
+  'demo.node.branchA': 'Campus',
+  'demo.node.branchB': 'Home',
+  'demo.node.end': 'End',
   'feature.edit.title': 'Graph / Code Dual Mode',
   'feature.edit.desc':
     'The visual canvas and the Monaco code editor stay in sync in real time, preserving the original indentation of your script.',

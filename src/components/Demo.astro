@@ -1,0 +1,833 @@
+---
+import TitleRing from './TitleRing.astro'
+import Icon from './Icon.astro'
+---
+<section class="section demo-wrap" id="demo">
+  <h2 class="section-title"><TitleRing i18n="demo.title">左边织故事，右边立刻玩</TitleRing></h2>
+  <p class="section-sub" data-i18n="demo.sub">
+    左侧是织机° 的故事图形编辑器 —— 点击节点查看内容，按「运行」后右侧实时播放剧情，选项决定走向。
+  </p>
+
+  <div class="ed-demo">
+    <!-- 左：织机° 图形视图（场景块列表） -->
+    <div class="ed-side">
+      <div class="lt-toolbar">
+        <span class="lt-path">script.rpy</span>
+        <span class="lt-toggle">
+          <button type="button" class="lt-btn is-on" data-i18n="demo.modeGraph">图形</button>
+          <button type="button" class="lt-btn is-off" disabled title="网页版仅提供图形视图" data-i18n="demo.modeCode">代码</button>
+        </span>
+        <button type="button" class="ed-run" id="demo-run">
+          <Icon name="magic" size={14} />
+          <span data-i18n="demo.run">运行</span>
+        </button>
+        <span class="lt-lines">L8</span>
+      </div>
+      <div class="loom-blocks" id="loom-blocks"></div>
+      <div class="ed-panel">
+        <span class="ed-panel-head" id="ed-panel-type"></span>
+        <p class="ed-panel-body" id="ed-panel-body"></p>
+      </div>
+      <div class="cmd-palette" id="cmd-palette" hidden></div>
+    </div>
+
+    <!-- 右：试玩预览 -->
+    <div class="ed-side ed-play">
+      <div class="ed-toolbar">
+        <span class="ed-toolbar-title" data-i18n="demo.playTitle">试玩预览</span>
+      </div>
+      <div class="demo-scene" id="demo-scene">
+        <p class="demo-standby" id="demo-standby" data-i18n="demo.ready">
+          点击「运行」，右侧开始播放这一段。
+        </p>
+        <div class="demo-dialog" id="demo-dialog" hidden>
+          <span class="demo-name" id="demo-name"></span>
+          <p class="demo-text" id="demo-text"></p>
+          <span class="demo-continue" id="demo-continue">▾</span>
+        </div>
+        <div class="demo-choices" id="demo-choices" hidden></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+  // 示例剧本（中英双语）
+  const SCRIPT = {
+    zh: [
+      { id: 0, who: '', text: '清晨，阳光透过窗帘洒进房间。', to: 1 },
+      { id: 1, who: '艾琳', text: '欢迎来到『织机° 示例』的世界！', to: 2 },
+      { id: 2, who: '艾琳', text: '接下来的路，由你来选。', to: 3 },
+      {
+        id: 3,
+        who: '艾琳',
+        text: '今天想去哪里呢？',
+        choices: [
+          { label: '去校园', to: 'a' },
+          { label: '留在家里', to: 'b' },
+        ],
+      },
+      { id: 'a', who: '艾琳', text: '校园里的风，吹得让人清醒。真不错呢。', to: 5 },
+      { id: 'b', who: '艾琳', text: '家里安安静静，适合写一整天故事。', to: 5 },
+      { id: 5, who: '', text: '—— 这只是织机° 织出的一小段。剩下的，交给你来织。', to: null },
+    ],
+    en: [
+      { id: 0, who: '', text: 'Morning light slips through the curtains.', to: 1 },
+      { id: 1, who: 'Irene', text: "Welcome to the 'Loom° Sample' world!", to: 2 },
+      { id: 2, who: 'Irene', text: 'The road ahead — you choose it.', to: 3 },
+      {
+        id: 3,
+        who: 'Irene',
+        text: 'Where do you want to go today?',
+        choices: [
+          { label: 'To the campus', to: 'a' },
+          { label: 'Stay home', to: 'b' },
+        ],
+      },
+      { id: 'a', who: 'Irene', text: "The campus breeze is refreshing. Lovely.", to: 5 },
+      { id: 'b', who: 'Irene', text: 'Quiet at home — perfect for writing all day.', to: 5 },
+      { id: 5, who: '', text: '— Just a snippet woven by Loom°. The rest is yours to weave.', to: null },
+    ],
+  }
+
+  // 面板用到的本地化小词典（节点类型标签 + 起止描述）
+  const L = {
+    zh: {
+      start: '开始',
+      say: '对白',
+      choice: '选项',
+      end: '结尾',
+      panelStart: '剧本入口 —— 从这里开始。',
+      panelEnd: '故事结尾 —— 再次「运行」可重播。',
+    },
+    en: {
+      start: 'Start',
+      say: 'Dialogue',
+      choice: 'Choice',
+      end: 'End',
+      panelStart: 'Script entry — start here.',
+      panelEnd: 'The end — press Run again to replay.',
+    },
+  }
+
+  // 命令面板本地化（复刻 APP 的 CommandPalette：分类 + 全部命令）
+  const PAL = {
+    zh: {
+      add: '添加命令',
+      search: '搜索命令…',
+      empty: '未找到匹配命令',
+      catAll: '全部', catChar: '角色', catDialog: '对话', catScene: '场景', catFlow: '流程', catData: '数据', catMedia: '媒体', catTools: '工具',
+      locked: '演示版暂不支持添加',
+      items: {
+        show: ['显示', '显示角色或舞台对象'], hide: ['隐藏', '隐藏角色或舞台对象'], dialogue: ['角色对话', '给角色加一句台词'], narrator: ['旁白', '叙述场景氛围'],
+        scene: ['背景', '切换背景图'], label: ['场景', '新建 label 段落'], jump: ['跳转', '跳到指定场景'], call: ['调用', '调用另一段剧本'],
+        menu: ['选项', '让玩家做出选择'], save: ['存档', '插入存档点'], set: ['修改变量', '设定剧情变量'], if: ['如果', '按条件分支'],
+        movie: ['过场动画', '播放视频过场'], openurl: ['跳转网站', '打开一个链接'], comment: ['注释', '给剧本写批注'], blank: ['空行', '插入空行'],
+      },
+    },
+    en: {
+      add: 'Add command',
+      search: 'Search commands…',
+      empty: 'No matching commands',
+      catAll: 'All', catChar: 'Character', catDialog: 'Dialogue', catScene: 'Scene', catFlow: 'Flow', catData: 'Data', catMedia: 'Media', catTools: 'Tools',
+      locked: 'Not supported in this demo',
+      items: {
+        show: ['Show', 'Show a character or stage object'], hide: ['Hide', 'Hide a character or stage object'], dialogue: ['Character line', 'Add a line for a character'], narrator: ['Narrator', 'Describe the scene'],
+        scene: ['Background', 'Switch the background'], label: ['Label', 'Start a new label block'], jump: ['Jump', 'Jump to a label'], call: ['Call', 'Run another script segment'],
+        menu: ['Menu', 'Let the player choose'], save: ['Save point', 'Insert a save point'], set: ['Set variable', 'Set a story variable'], if: ['If', 'Branch on a condition'],
+        movie: ['Cutscene', 'Play a video cutscene'], openurl: ['Open URL', 'Open a link'], comment: ['Comment', 'Annotate the script'], blank: ['Blank line', 'Insert an empty line'],
+      },
+    },
+  }
+  // 面板分类（页签 → 命令集合）
+  const CATS: [string, string[]][] = [
+    ['catChar', ['show', 'hide']],
+    ['catDialog', ['dialogue', 'narrator']],
+    ['catScene', ['scene']],
+    ['catFlow', ['label', 'jump', 'call', 'menu']],
+    ['catData', ['save', 'set', 'if']],
+    ['catMedia', ['movie']],
+    ['catTools', ['openurl', 'comment', 'blank']],
+  ]
+  const ADD_ORDER = ['show', 'hide', 'dialogue', 'narrator', 'scene', 'label', 'jump', 'call', 'menu', 'save', 'set', 'if', 'movie', 'openurl', 'comment', 'blank']
+  // 演示版可真正添加的命令
+  const ADDABLE = ['narrator', 'dialogue', 'menu']
+  // 新增块默认内容（按语言）
+  const INS = {
+    zh: { narrator: '（在这里继续织你的故事……）', who: '新角色', dialogue: '一句新的对白。', menuPrompt: '接下来呢？', menuC1: '选项一', menuC2: '选项二' },
+    en: { narrator: '(Keep weaving your story here…)', who: 'New', dialogue: 'A new line of dialogue.', menuPrompt: 'What next?', menuC1: 'Option 1', menuC2: 'Option 2' },
+  }
+  // 编辑表单本地化
+  const EDIT = {
+    zh: { who: '角色', dialog: '对话', narrator: '旁白', c1: '选项一', c2: '选项二', save: '完成', cancel: '取消', hint: '双击场景块可编辑' },
+    en: { who: 'Character', dialog: 'Dialogue', narrator: 'Narrator', c1: 'Option 1', c2: 'Option 2', save: 'Done', cancel: 'Cancel', hint: 'Double-click a block to edit' },
+  }
+
+  // 命令图标（复刻 APP CommandPalette 的 SVG 图形）
+  const ICONS: Record<string, string> = {
+    all: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
+    catChar: '<circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 4-6 8-6s8 2 8 6"/>',
+    catDialog: '<path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>',
+    catScene: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>',
+    catFlow: '<path d="M5 12h14M13 5l7 7-7 7"/>',
+    catData: '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>',
+    catMedia: '<rect x="2" y="4" width="20" height="16" rx="2"/><polygon points="10,8 16,12 10,16"/>',
+    catTools: '<path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/>',
+    show: '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>',
+    hide: '<path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>',
+    dialogue: '<path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>',
+    narrator: '<path d="M4 6h16M4 12h10M4 18h16"/>',
+    scene: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>',
+    label: '<path d="M4 4h16v16H4z"/><path d="M4 9h16M9 4v16"/>',
+    jump: '<path d="M5 12h14M13 5l7 7-7 7"/>',
+    call: '<path d="M5 12h14M13 5l7 7-7 7"/>',
+    menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+    save: '<path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/>',
+    set: '<text x="12" y="16" textAnchor="middle" fontSize="16" fontWeight="600" stroke="none" fill="currentColor">x</text>',
+    if: '<path d="M6 3v12M18 9l-6 6-6-6"/>',
+    movie: '<rect x="2" y="4" width="20" height="16" rx="2"/><polygon points="10,8 16,12 10,16"/>',
+    openurl: '<path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>',
+    comment: '<path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>',
+    blank: '<rect x="3" y="11" width="18" height="2"/>',
+  }
+  function svg(name: string, size: number): string {
+    return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" width="${size}" height="${size}" style="flex-shrink:0" aria-hidden="true">${ICONS[name] ?? ''}</svg>`
+  }
+
+  // 可编辑剧本状态：插入/编辑记录跨语言重建，保证中英剧本同步
+  let insertions: { afterId: string | number; type: string }[] = []
+  let edits: { id: string | number; lg: 'zh' | 'en'; patch: Record<string, unknown> }[] = []
+  let seq = 0
+  let state: { zh: Record<string, unknown>[]; en: Record<string, unknown>[] }
+  function rebuildState() {
+    const clone = <T extends Record<string, unknown>>(arr: T[]): T[] => arr.map((n) => ({ ...n }))
+    state = { zh: clone(SCRIPT.zh), en: clone(SCRIPT.en) }
+    seq = 0
+    for (const ins of insertions) {
+      const id = 'n' + (++seq)
+      ;(['zh', 'en'] as const).forEach((lg) => {
+        const arr = state[lg]
+        const anchorIdx = arr.findIndex((n) => n.id === ins.afterId)
+        if (anchorIdx < 0) return
+        const anchor = arr[anchorIdx]
+        const next = anchor.to
+        const t = INS[lg]
+        let newNode: Record<string, unknown>
+        if (ins.type === 'narrator') newNode = { id, who: '', text: t.narrator, to: next }
+        else if (ins.type === 'dialogue') newNode = { id, who: t.who, text: t.dialogue, to: next }
+        else newNode = { id, who: '', text: t.menuPrompt, choices: [{ label: t.menuC1, to: next }, { label: t.menuC2, to: next }] }
+        anchor.to = id
+        arr.splice(anchorIdx + 1, 0, newNode)
+      })
+    }
+    // 编辑记录只作用于其所在语言
+    ;(['zh', 'en'] as const).forEach((lg) => {
+      edits.filter((e) => e.lg === lg).forEach((e) => {
+        const target = state[lg].find((n) => n.id === e.id)
+        if (target) Object.assign(target, e.patch)
+      })
+    })
+  }
+  rebuildState()
+
+  const TYPE_MS = 34
+  const $ = (s: string) => document.querySelector<HTMLElement>(s)
+  const blocksEl = $('#loom-blocks')
+  const linesEl = $('#lt-lines')
+  const panelType = $('#ed-panel-type')
+  const panelBody = $('#ed-panel-body')
+  const runBtn = $('#demo-run')
+  const standby = $('#demo-standby')
+  const dialogEl = $('#demo-dialog')
+  const sceneEl = $('#demo-scene')
+  const nameEl = $('#demo-name')
+  const textEl = $('#demo-text')
+  const contEl = $('#demo-continue')
+  const choicesEl = $('#demo-choices')
+
+  let current: Record<string, unknown> | null = null
+  let selected = 0
+  let started = false
+  let timer = 0
+  let typing = false
+  let typingCount = 0
+
+  function lang(): 'zh' | 'en' {
+    return (document.documentElement.lang || 'zh-CN').startsWith('en') ? 'en' : 'zh'
+  }
+  function node(id: string | number): Record<string, unknown> | undefined {
+    return state[lang()].find((n) => n.id === id)
+  }
+
+  // ---------- 左栏：织机° 图形视图（场景块列表） ----------
+  function esc(s: unknown): string {
+    return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] as string)
+  }
+
+  // 「+」添加按钮（鼠标悬停所在块时才显示）
+  function renderAddBtn(afterId: string | number | null, locked: boolean, large = false): string {
+    return `<div class="add-row${large ? ' is-large' : ''}">
+      <button type="button" class="add-btn${large ? ' is-large' : ''}${locked ? ' is-locked' : ''}"
+        data-after="${afterId === null ? '' : afterId}" ${locked ? 'disabled' : ''}
+        title="${esc(PAL[lang()].add)}" aria-label="${esc(PAL[lang()].add)}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" width="12" height="12" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+    </div>`
+  }
+
+  // 正在编辑的块 id（双击进入编辑）
+  let editingId: string | number | null = null
+
+  // 编辑表单（复刻 APP 的内联编辑：角色/对话/旁白/选项字段）
+  function renderEditForm(id: string | number, n: Record<string, unknown>): string {
+    const t = EDIT[lang()]
+    if (n.choices) {
+      const cs = (n.choices as { label: string; to: string }[]) ?? []
+      return `<div class="lb-edit" data-node="${id}">
+        <div class="lb-field"><span class="lb-field-label">${t.dialog}</span>
+          <input class="lb-input" id="ef-prompt" value="${esc(n.text)}" /></div>
+        <div class="lb-field"><span class="lb-field-label">${t.c1}</span>
+          <input class="lb-input" id="ef-c1" value="${esc(cs[0]?.label ?? '')}" /></div>
+        <div class="lb-field"><span class="lb-field-label">${t.c2}</span>
+          <input class="lb-input" id="ef-c2" value="${esc(cs[1]?.label ?? '')}" /></div>
+        <div class="lb-edit-actions">
+          <button type="button" class="lb-cancel">${t.cancel}</button>
+          <button type="button" class="lb-ok">${t.save}</button>
+        </div>
+      </div>`
+    }
+    if (n.who) {
+      return `<div class="lb-edit" data-node="${id}">
+        <div class="lb-field"><span class="lb-field-label">${t.who}</span>
+          <input class="lb-input" id="ef-who" value="${esc(n.who)}" /></div>
+        <div class="lb-field"><span class="lb-field-label">${t.dialog}</span>
+          <textarea class="lb-input" id="ef-text">${esc(n.text)}</textarea></div>
+        <div class="lb-edit-actions">
+          <button type="button" class="lb-cancel">${t.cancel}</button>
+          <button type="button" class="lb-ok">${t.save}</button>
+        </div>
+      </div>`
+    }
+    return `<div class="lb-edit" data-node="${id}">
+      <div class="lb-field"><span class="lb-field-label">${t.narrator}</span>
+        <textarea class="lb-input" id="ef-text">${esc(n.text)}</textarea></div>
+      <div class="lb-edit-actions">
+        <button type="button" class="lb-cancel">${t.cancel}</button>
+        <button type="button" class="lb-ok">${t.save}</button>
+      </div>
+    </div>`
+  }
+
+  // 渲染单个场景块
+  function renderBlockHtml(n: Record<string, unknown>, id: string): string {
+    if (id === '0' || id === '5') {
+      return `
+      <div class="lblock" data-node="${id}">
+        <div class="lb-body">
+          <div class="lb-label">label ${id === '0' ? 'start' : 'end'}:</div>
+          <div class="lb-dialogue lb-narrator">${esc(n.text)}</div>
+          ${id === '5' ? '<div class="lb-meta">return</div>' : ''}
+        </div>
+      </div>`
+    }
+    if (n.choices) {
+      const prompt = (n.who as string) ? `<div class="lb-menu-prompt"><span class="lb-char">${esc(n.who)}</span> ${esc(n.text)}</div>` : `<div class="lb-menu-prompt">${esc(n.text)}</div>`
+      return `
+      <div class="lblock" data-node="${id}">
+        <div class="lb-body">
+          ${prompt}
+          ${(n.choices as { label: string; to: string }[])
+            .map((c) => `<div class="lb-option"><span class="lb-opt-mark">▸</span>${esc(c.label)}<span class="lb-jump">→ jump ${esc(c.to)}</span></div>`)
+            .join('')}
+        </div>
+      </div>`
+    }
+    if (n.who) {
+      return `
+      <div class="lblock" data-node="${id}">
+        <div class="lb-body">
+          <div class="lb-dialogue"><span class="lb-char">${esc(n.who)}</span> ${esc(n.text)}</div>
+        </div>
+      </div>`
+    }
+    return `
+    <div class="lblock" data-node="${id}">
+      <div class="lb-body">
+        <div class="lb-dialogue lb-narrator">${esc(n.text)}</div>
+      </div>
+    </div>`
+  }
+
+  // 按当前语言渲染场景块（含行号）+ 悬停「+」按钮
+  function renderBlocks() {
+    if (!blocksEl) return
+    const ns = state[lang()]
+    let ln = 0
+    let html = ''
+    ns.forEach((n, i) => {
+      const id = String(n.id)
+      const anchorId = i === 0 ? null : (ns[i - 1].id as string | number)
+      // 首块之前、以及选项/结尾之后不允许插入
+      const locked = i === 0 || anchorId === 3 || anchorId === 5
+      const isLabel = id === '0' || id === '5'
+      const extra = isLabel ? (id === '5' ? 3 : 2) : n.choices ? 3 : 1
+      const lineStart = ln + 1
+      ln += extra
+      let blockHtml: string
+      if (editingId !== null && String(editingId) === id && !isLabel) {
+        blockHtml = `<div class="blk-row">${renderEditForm(id, n)}</div>`
+      } else {
+        blockHtml = `<div class="blk-row"><div class="lb-line">L${lineStart}</div>${renderBlockHtml(n, id)}</div>`
+      }
+      html += `<div class="group${i === 0 ? ' is-first' : ''}">${renderAddBtn(anchorId, locked)}${blockHtml}</div>`
+    })
+    // 末尾大号添加按钮（结尾块后不可加）
+    const last = ns[ns.length - 1]
+    html += `<div class="group group-end">${renderAddBtn(last?.id ?? null, String(last?.id) === '5', true)}</div>`
+    blocksEl.innerHTML = html
+    if (linesEl) linesEl.textContent = `L${ln}`
+  }
+
+  function setActive(id: string | number, candidates: (string | number)[] = [], dims: (string | number)[] = []) {
+    blocksEl?.querySelectorAll<HTMLElement>('.lblock').forEach((el) => {
+      const nid = el.dataset.node || ''
+      el.classList.toggle('is-active', nid === String(id))
+      el.classList.toggle('is-candidate', candidates.includes(nid))
+      el.classList.toggle('is-dim', dims.includes(nid))
+    })
+  }
+
+  function clearActive() {
+    blocksEl?.querySelectorAll<HTMLElement>('.lblock').forEach((el) => {
+      el.classList.remove('is-active', 'is-candidate', 'is-dim')
+    })
+  }
+
+  function selectNode(id: string | number) {
+    selected = id
+    blocksEl?.querySelectorAll<HTMLElement>('.lblock').forEach((el) => {
+      el.classList.toggle('is-selected', el.dataset.node === String(id))
+    })
+    fillPanel(id)
+  }
+
+  function fillPanel(id: string | number) {
+    if (!panelType || !panelBody) return
+    const n = node(id)
+    const l = L[lang()]
+    if (!n) return
+    if (id === 0) {
+      panelType.textContent = l.start
+      panelBody.textContent = l.panelStart
+    } else if (id === 5) {
+      panelType.textContent = l.end
+      panelBody.textContent = l.panelEnd
+    } else if (n.choices) {
+      panelType.textContent = l.choice
+      panelBody.textContent = (n.choices as { label: string; to: string }[]).map((c) => c.label).join('　·　')
+    } else {
+      panelType.textContent = l.say
+      panelBody.textContent = (n.who as string ? `${n.who as string}：` : '') + (n.text as string)
+    }
+  }
+
+  // 编辑保存 / 取消
+  function saveEdit() {
+    const id = editingId
+    if (id === null) return
+    const form = blocksEl?.querySelector('.lb-edit')
+    const n = node(id)
+    if (!form || !n) return
+    const q = (sel: string) => (form.querySelector<HTMLInputElement>(sel)?.value ?? '').trim()
+    const qt = (sel: string) => (form.querySelector<HTMLTextAreaElement>(sel)?.value ?? '').trim()
+    const patch: Record<string, unknown> = {}
+    if (n.choices) {
+      const cs = n.choices as { label: string; to: string }[]
+      patch.text = q('#ef-prompt')
+      patch.choices = [
+        { label: q('#ef-c1') || '—', to: cs[0]?.to ?? '' },
+        { label: q('#ef-c2') || '—', to: cs[1]?.to ?? '' },
+      ]
+    } else if (n.who) {
+      patch.who = q('#ef-who')
+      patch.text = qt('#ef-text')
+    } else {
+      patch.text = qt('#ef-text')
+    }
+    edits.push({ id, lg: lang(), patch })
+    editingId = null
+    rebuildState()
+    renderBlocks()
+    selectNode(id)
+  }
+
+  blocksEl?.addEventListener('click', (e) => {
+    const t = e.target as HTMLElement
+    const okBtn = t.closest<HTMLElement>('.lb-ok')
+    if (okBtn) {
+      saveEdit()
+      return
+    }
+    const cancelBtn = t.closest<HTMLElement>('.lb-cancel')
+    if (cancelBtn) {
+      const id = editingId
+      editingId = null
+      renderBlocks()
+      if (id !== null) selectNode(id)
+      return
+    }
+    const addBtn = t.closest<HTMLElement>('.add-btn')
+    if (addBtn && !addBtn.hasAttribute('disabled')) {
+      openPalette(addBtn.dataset.after ? (Number(addBtn.dataset.after) || addBtn.dataset.after) : null, addBtn)
+      return
+    }
+    const nodeEl = t.closest<HTMLElement>('.lblock')
+    if (!nodeEl || !nodeEl.dataset.node) return
+    selectNode(Number(nodeEl.dataset.node) || nodeEl.dataset.node)
+  })
+
+  // 双击场景块进入编辑（开始/结尾不可编辑）
+  blocksEl?.addEventListener('dblclick', (e) => {
+    const nodeEl = (e.target as HTMLElement).closest<HTMLElement>('.lblock')
+    if (!nodeEl || !nodeEl.dataset.node) return
+    const raw = nodeEl.dataset.node
+    if (raw === '0' || raw === '5' || pal.open) return
+    // 与 state 中的 id 类型保持一致（数字 id 转 number，插入节点 n1… 保持字符串）
+    const id = Number(raw) || raw
+    editingId = id
+    renderBlocks()
+    selectNode(id)
+    const first = blocksEl?.querySelector<HTMLElement>('.lb-edit input, .lb-edit textarea')
+    first?.focus()
+  })
+
+  // ---------- 命令面板（复刻 APP 的 CommandPalette） ----------
+  const paletteEl = $('#cmd-palette')
+  // 挂到 body，避免父级 overflow/transform 影响 fixed 定位
+  if (paletteEl && paletteEl.parentElement !== document.body) document.body.appendChild(paletteEl)
+  let pal = { open: false, afterId: null as string | number | null, search: '', sel: 0, cat: 'all', x: 0, y: 0 }
+
+  // 当前分类 + 搜索过滤后的命令列表
+  function filteredList(): string[] {
+    let items: string[]
+    if (pal.cat === 'all') items = ADD_ORDER
+    else items = CATS.find(([ck]) => ck === pal.cat)?.[1] ?? []
+    const q = pal.search.trim().toLowerCase()
+    if (q) {
+      const t = PAL[lang()]
+      items = items.filter((type) => {
+        const [label, desc] = t.items[type as keyof typeof t.items]
+        return label.toLowerCase().includes(q) || desc.toLowerCase().includes(q) || type.toLowerCase().includes(q)
+      })
+    }
+    return items
+  }
+
+  // 左侧分类栏 + 右侧命令列表的 HTML
+  function paletteBodyHtml(): string {
+    const t = PAL[lang()]
+    const items = filteredList()
+    let nav = `<button type="button" class="cp-nav${pal.cat === 'all' ? ' is-on' : ''}" data-cat="all"><span class="cp-ico">${svg('all', 16)}</span>${t.catAll}</button>`
+    CATS.forEach(([ck]) => {
+      nav += `<button type="button" class="cp-nav${pal.cat === ck ? ' is-on' : ''}" data-cat="${ck}"><span class="cp-ico">${svg(ck, 16)}</span>${t[ck as keyof typeof t]}</button>`
+    })
+    let list = ''
+    if (items.length === 0) {
+      list = `<div class="cp-empty">${t.empty}</div>`
+    } else {
+      items.forEach((type, i) => {
+        const addable = ADDABLE.includes(type)
+        const [label, desc] = t.items[type as keyof typeof t.items]
+        list += `<button type="button" class="cp-item${i === pal.sel ? ' is-sel' : ''}${addable ? '' : ' is-locked'}" data-type="${type}"${addable ? '' : ` title="${esc(t.locked)}"`}>
+          <span class="cp-ico">${svg(type, 18)}</span>
+          <span class="cp-item-txt"><span class="cp-item-label">${label}</span><span class="cp-item-desc">${desc}</span></span>
+        </button>`
+      })
+    }
+    return `<div class="cp-body"><div class="cp-side">${nav}</div><div class="cp-list">${list}</div></div>`
+  }
+
+  // 只重绘 导航+列表，不动搜索框（保持输入焦点）
+  function renderBody() {
+    const body = paletteEl?.querySelector('.cp-body')
+    if (body) body.innerHTML = paletteBodyHtml()
+  }
+
+  function renderPalette() {
+    if (!paletteEl) return
+    if (!pal.open) {
+      paletteEl.hidden = true
+      return
+    }
+    const t = PAL[lang()]
+    paletteEl.innerHTML = `<div class="cp-panel" style="left:${pal.x}px;top:${pal.y}px">
+      <div class="cp-search-wrap"><input type="text" id="cp-search" class="cp-search" placeholder="${esc(t.search)}" value="${esc(pal.search)}" autocomplete="off" spellcheck="false" /></div>
+      ${paletteBodyHtml()}
+    </div>`
+    paletteEl.hidden = false
+    // 打开后聚焦搜索框，光标放到末尾
+    window.setTimeout(() => {
+      const inp = paletteEl?.querySelector<HTMLInputElement>('#cp-search')
+      if (!inp) return
+      inp.focus()
+      try {
+        inp.setSelectionRange(inp.value.length, inp.value.length)
+      } catch {
+        /* 忽略旧浏览器 */
+      }
+    }, 30)
+  }
+
+  function openPalette(afterId: string | number | null, btn: HTMLElement) {
+    const r = btn.getBoundingClientRect()
+    const PW = 420
+    const PH = 380
+    // 出现在按钮下方，钳制在视口内
+    const left = Math.max(10, Math.min(r.left, window.innerWidth - PW - 10))
+    const top = Math.max(10, Math.min(r.bottom + 4, window.innerHeight - PH - 10))
+    pal = { open: true, afterId, search: '', sel: 0, cat: 'all', x: left, y: top }
+    renderPalette()
+  }
+
+  function closePalette() {
+    pal.open = false
+    if (paletteEl) paletteEl.hidden = true
+  }
+
+  // 点击：遮罩关闭 / 分类切换 / 选择命令
+  paletteEl?.addEventListener('click', (e) => {
+    const t = e.target as HTMLElement
+    if (!t.closest('.cp-panel')) {
+      closePalette()
+      return
+    }
+    const nav = t.closest<HTMLElement>('.cp-nav')
+    if (nav && nav.dataset.cat) {
+      pal.cat = nav.dataset.cat
+      pal.sel = 0
+      renderBody()
+      return
+    }
+    const item = t.closest<HTMLElement>('.cp-item')
+    if (item && item.dataset.type && !item.classList.contains('is-locked')) {
+      insertBlock(item.dataset.type)
+    }
+  })
+
+  // 鼠标悬停选中（APP 同款：悬停即高亮）
+  paletteEl?.addEventListener('mouseover', (e) => {
+    const item = (e.target as HTMLElement).closest<HTMLElement>('.cp-item')
+    if (!item || item.classList.contains('is-locked')) return
+    const kids = Array.from(item.parentElement?.children ?? []).filter((c) => c.classList.contains('cp-item'))
+    const idx = kids.indexOf(item)
+    if (idx < 0 || idx === pal.sel) return
+    pal.sel = idx
+    item.parentElement?.querySelectorAll('.cp-item.is-sel').forEach((el) => el.classList.remove('is-sel'))
+    item.classList.add('is-sel')
+  })
+
+  // 搜索输入：只重绘列表，保持焦点
+  paletteEl?.addEventListener('input', (e) => {
+    const inp = e.target as HTMLInputElement
+    if (inp.id !== 'cp-search') return
+    pal.search = inp.value
+    pal.sel = 0
+    renderBody()
+  })
+
+  function insertBlock(type: string) {
+    if (pal.afterId === null) return
+    insertions.push({ afterId: pal.afterId, type })
+    rebuildState()
+    closePalette()
+    editingId = null
+    // 重置播放，聚焦到新增块
+    stopType()
+    started = false
+    current = null
+    typingCount = 0
+    if (standby) standby.hidden = false
+    if (dialogEl) dialogEl.hidden = true
+    if (choicesEl) choicesEl.hidden = true
+    clearActive()
+    renderBlocks()
+    selectNode('n' + insertions.length)
+  }
+
+  // 键盘导航：↑↓ 移动选择，Enter 插入，Esc 关闭
+  document.addEventListener('keydown', (e) => {
+    if (!pal.open) return
+    if (e.key === 'Escape') {
+      closePalette()
+      return
+    }
+    const items = filteredList()
+    if (items.length === 0) return
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      pal.sel = Math.min(pal.sel + 1, items.length - 1)
+      renderBody()
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      pal.sel = Math.max(pal.sel - 1, 0)
+      renderBody()
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      const type = items[pal.sel]
+      if (type && ADDABLE.includes(type)) insertBlock(type)
+    }
+  })
+
+  // ---------- 右栏：试玩预览 ----------
+  function stopType() {
+    if (timer) window.clearInterval(timer)
+    timer = 0
+    typing = false
+  }
+
+  function typeOut(text: string) {
+    if (!textEl) return
+    stopType()
+    textEl.textContent = ''
+    const chars = Array.from(text)
+    if (chars.length <= 6) {
+      textEl.textContent = text
+      return
+    }
+    typing = true
+    contEl?.classList.remove('is-on')
+    timer = window.setInterval(() => {
+      typingCount += 1
+      textEl.textContent = chars.slice(0, typingCount).join('')
+      if (typingCount >= chars.length) {
+        stopType()
+        contEl?.classList.add('is-on')
+      }
+    }, TYPE_MS)
+  }
+
+  function showChoices(cs: { label: string; to: string }[]) {
+    if (!choicesEl) return
+    choicesEl.textContent = ''
+    cs.forEach((c) => {
+      const btn = document.createElement('button')
+      btn.type = 'button'
+      btn.className = 'demo-choice'
+      btn.textContent = c.label
+      // 阻止冒泡：避免触发右栏 sceneEl 的「点击继续」导致二次推进
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation()
+        go(c.to)
+      })
+      choicesEl.appendChild(btn)
+    })
+    choicesEl.hidden = false
+  }
+
+  function go(id: string | number) {
+    const n = node(id)
+    if (!n) return
+    current = n
+    stopType()
+    typingCount = 0
+
+    if (n.choices) {
+      // 选项节点：示例分支高亮两条分支，新增的普通菜单只高亮菜单块本身
+      setActive(n.id, String(n.id) === '3' ? ['a', 'b'] : [], [])
+    } else {
+      setActive(n.id, [], id === 'a' ? ['b'] : id === 'b' ? ['a'] : [])
+    }
+
+    if (choicesEl) choicesEl.hidden = true
+    if (contEl) contEl.classList.remove('is-on')
+    if (nameEl) nameEl.textContent = (n.who as string) || ''
+    dialogEl?.classList.remove('is-ending')
+
+    // 选项节点没有 to 字段，必须先于结尾判断处理
+    if (n.choices) {
+      // 隐藏对话框，选项独立显示在底部，避免重叠
+      if (dialogEl) dialogEl.hidden = true
+      if (textEl) textEl.textContent = n.text as string
+      showChoices(n.choices as { label: string; to: string }[])
+      return
+    }
+
+    if (dialogEl) dialogEl.hidden = false
+
+    if (n.to == null) {
+      if (textEl) textEl.textContent = n.text as string
+      dialogEl?.classList.add('is-ending')
+      return
+    }
+
+    typingCount = 0
+    typeOut(n.text as string)
+  }
+
+  function start() {
+    started = true
+    if (standby) standby.hidden = true
+    if (dialogEl) dialogEl.hidden = false
+    go(0)
+  }
+
+  // 点击右栏：未开始 → 开始；打字中 → 立即完成；完成 → 下一节点
+  sceneEl?.addEventListener('click', () => {
+    if (!started) {
+      start()
+      return
+    }
+    if (!current || current.to == null) return
+    if (current.choices) return
+    if (typing) {
+      stopType()
+      typingCount = 0
+      if (textEl) textEl.textContent = current.text as string
+      contEl?.classList.add('is-on')
+      return
+    }
+    go(current.to as string | number)
+  })
+
+  // 运行按钮：未开始则开始，已开始则从头重播
+  runBtn?.addEventListener('click', () => {
+    if (!started) start()
+    else go(0)
+  })
+
+  // 键盘支持：仅鼠标悬停在 Demo 内时，空格/回车 继续
+  const windowEl = document.querySelector<HTMLElement>('.ed-demo')
+  let hover = false
+  windowEl?.addEventListener('mouseenter', () => (hover = true))
+  windowEl?.addEventListener('mouseleave', () => (hover = false))
+  document.addEventListener('keydown', (e) => {
+    if (!hover) return
+    // 命令面板打开时（焦点在搜索框）不响应播放快捷键
+    if (pal.open || (paletteEl && !paletteEl.hidden && paletteEl.contains(e.target as Node))) return
+    if (e.key === ' ' || e.key === 'Enter') {
+      const tag = (e.target as HTMLElement)?.tagName
+      if (tag === 'BUTTON') return
+      sceneEl?.dispatchEvent(new Event('click'))
+      e.preventDefault()
+    }
+  })
+
+  // 语言切换后回到待机态，按新语言重渲染场景块并选中首块
+  window.addEventListener('i18nchange', () => {
+    stopType()
+    started = false
+    current = null
+    typingCount = 0
+    closePalette()
+    if (standby) standby.hidden = false
+    if (dialogEl) dialogEl.hidden = true
+    if (choicesEl) choicesEl.hidden = true
+    clearActive()
+    rebuildState()
+    renderBlocks()
+    selectNode(0)
+  })
+
+  renderBlocks()
+  selectNode(0)
+</script>

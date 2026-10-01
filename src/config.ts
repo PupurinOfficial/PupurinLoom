@@ -67,6 +67,68 @@ export const downloadSlides: DownloadSlide[] = [
   },
 ]
 
+export interface Path {
+  icon: string
+  title: string
+  desc: string
+  cta: string
+  href: string
+}
+
+// 受众定位：写给个人与同人创作者，轻量而完整
+export const paths: Path[] = [
+  {
+    icon: 'spark',
+    title: '第一次做 Galgame 的新人',
+    desc: '零代码上手：打开织机°，图形画布上拖出节点，第一段对白就在眼前跑起来。',
+    cta: '立即下载',
+    href: '#download',
+  },
+  {
+    icon: 'bubble',
+    title: '为喜欢的角色做二创',
+    desc: '同人小故事、日常片段、心爱的 CP —— 不写一行代码，就能织成可以玩的小短篇。',
+    cta: '立即下载',
+    href: '#download',
+  },
+  {
+    icon: 'user',
+    title: '写多角色、多线故事的人',
+    desc: '角色差分自动同步脚本，跨文件跳转一眼看清 —— 一个人也能 hold 住群像与分支。',
+    cta: '查看特性',
+    href: '#features',
+  },
+]
+
+export interface StoryBlock {
+  icon: string // 图标 id
+  title: string
+  desc: string
+  bullets: string[]
+}
+
+// 特性区「场景故事块」：把 8 张能力卡片收敛成 3 个创作阶段
+export const storyBlocks: StoryBlock[] = [
+  {
+    icon: 'edit',
+    title: '写故事',
+    desc: '从第一句对白开始，图形画布与代码模式实时同步。',
+    bullets: ['拖拽编排剧情节点，label 跳转跨文件联动解析', '角色与差分定义自动同步 script.rpy，立绘声明不再手写', '跨文件剧本解析，悬空引用与条件变量错误早发现'],
+  },
+  {
+    icon: 'palette',
+    title: '设计界面',
+    desc: '玩家看到的每一处界面都可以在织机° 里重新定义。',
+    bullets: ['UI 设计器可视化调整对话框与菜单样式', '资源管理器拖拽移动、批量重命名并同步脚本引用', '内置 Ren\'Py ASCII 命名校验，规避平台兼容问题'],
+  },
+  {
+    icon: 'box',
+    title: '交付发布',
+    desc: '本地化审校、变量统计与版本打包都在同一个工作区完成。',
+    bullets: ['集成 Ren\'Py SDK，一键打包可发行版本', '本地 Python 后端解析统计，剧本与数据不传云端', '插件系统扩展命令、面板与事件钩子，生态自由生长'],
+  },
+]
+
 export interface Feature {
   icon: string // 图标 id（见 global.css 中 .ico-* 内联 svg）
   title: string
@@ -145,6 +207,7 @@ export const steps: Step[] = [
 
 export const nav = [
   { id: 'features', label: '特性' },
+  { id: 'demo', label: '在线体验' },
   { id: 'download', label: '下载' },
   { id: 'plugins', label: '插件' },
   { id: 'guide', label: '快速上手' },

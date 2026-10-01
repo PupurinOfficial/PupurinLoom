@@ -1,0 +1,22 @@
+---
+import { paths } from '../config'
+import Icon from './Icon.astro'
+import TitleRing from './TitleRing.astro'
+---
+<section class="section" id="paths">
+  <h2 class="section-title"><TitleRing i18n="paths.title">谁为织者？</TitleRing></h2>
+  <p class="section-sub" data-i18n="paths.sub">写给个人与同人创作者的轻量舞台 —— 一人、一晚、一个小故事，也能织成一部完整作品。</p>
+  <div class="paths-grid">
+    {paths.map((p, i) => (
+      <a class="path-card" href={p.href}>
+        <div class="path-ico"><Icon name={p.icon} size={24} /></div>
+        <h3 data-i18n={`path.${i}.title`}>{p.title}</h3>
+        <p data-i18n={`path.${i}.desc`}>{p.desc}</p>
+        <span class="path-cta">
+          <span data-i18n={`path.${i}.cta`}>{p.cta}</span>
+          <Icon name="chev" size={14} />
+        </span>
+      </a>
+    ))}
+  </div>
+</section>

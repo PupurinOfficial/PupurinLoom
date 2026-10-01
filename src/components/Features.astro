@@ -1,23 +1,48 @@
 ---
-import { features, site } from '../config'
+import { features, site, storyBlocks } from '../config'
 import Icon from './Icon.astro'
 import TitleRing from './TitleRing.astro'
 ---
 <section class="section" id="features">
   <h2 class="section-title"><TitleRing i18n="features.title">特性</TitleRing></h2>
   <p class="section-sub" data-i18n="features.sub">围绕 Ren'Py 剧本创作打造的完整工作台 —— 从剧情编排到打包发行。</p>
-  <div class="feature-grid">
-    {features.map((f) => (
-      <div class="feature-card">
-        <div class="ico"><Icon name={f.icon} size={22} /></div>
-        <h3 data-i18n={`feature.${f.icon}.title`}>{f.title}</h3>
-        <p data-i18n={`feature.${f.icon}.desc`}>{f.desc}</p>
+
+  <!-- 场景故事块：按创作阶段讲能力 -->
+  <div class="story-grid">
+    {storyBlocks.map((s, i) => (
+      <div class="story-card">
+        <div class="ico"><Icon name={s.icon} size={22} /></div>
+        <h3 data-i18n={`story.${i}.title`}>{s.title}</h3>
+        <p class="story-desc" data-i18n={`story.${i}.desc`}>{s.desc}</p>
+        <ul class="story-bullets">
+          {s.bullets.map((b, j) => (
+            <li data-i18n={`story.${i}.b${j}`}>{b}</li>
+          ))}
+        </ul>
       </div>
     ))}
   </div>
+
   {site.images.showcase && (
     <div class="showcase">
       <img src={site.images.showcase} alt={`${site.name} 功能展示`} />
     </div>
   )}
+
+  <!-- 全部能力清单（折叠） -->
+  <details class="feature-more">
+    <summary>
+      <span data-i18n="features.more">全部能力清单</span>
+      <Icon name="chev" size={14} />
+    </summary>
+    <div class="feature-grid">
+      {features.map((f) => (
+        <div class="feature-card">
+          <div class="ico"><Icon name={f.icon} size={22} /></div>
+          <h3 data-i18n={`feature.${f.icon}.title`}>{f.title}</h3>
+          <p data-i18n={`feature.${f.icon}.desc`}>{f.desc}</p>
+        </div>
+      ))}
+    </div>
+  </details>
 </section>

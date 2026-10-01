@@ -5,12 +5,15 @@ const base = import.meta.env.BASE_URL
 ---
 <section class="hero" id="top">
   <img class="hero-logo" src={`${base}pupurin-logo.png`} alt={site.name} />
-  <h1 data-i18n="site.name">{site.name}</h1>
-  <p class="en" data-i18n-hide="en">{site.nameEn}</p>
-  <p class="slogan" data-i18n="hero.slogan">「{site.slogan}」</p>
-  <p class="desc" data-i18n="hero.desc">{site.description}</p>
+  <p class="hero-brand" data-i18n-hide="en" data-i18n="site.name">{site.name}</p>
+  <p class="hero-brand en-only" data-i18n-hide="zh" data-i18n="site.name">Pupurin° Loom</p>
+  <h1 data-i18n="hero.title">以言为线，铃织成篇</h1>
+  <p class="desc" data-i18n="hero.sub">
+    面向 Ren'Py 的可视化创作工具 —— 零代码上手，图形 / 代码双模式实时同步，从剧本到打包发布一步到位。
+  </p>
   <div class="hero-cta">
     <a class="btn btn-primary" href="#download" data-i18n="hero.download">立即下载</a>
+    <a class="btn btn-ghost" href="#demo" data-i18n="hero.tryDemo">在线试玩</a>
     <a class="btn btn-ghost" href="#guide" data-i18n="hero.guide">快速上手</a>
   </div>
   {site.images.hero && (

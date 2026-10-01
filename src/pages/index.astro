@@ -3,7 +3,9 @@ import { site } from '../config'
 import '../styles/global.css'
 import Nav from '../components/Nav.astro'
 import Hero from '../components/Hero.astro'
+import Paths from '../components/Paths.astro'
 import Features from '../components/Features.astro'
+import Demo from '../components/Demo.astro'
 import Download from '../components/Download.astro'
 import Plugins from '../components/Plugins.astro'
 import Guide from '../components/Guide.astro'
@@ -27,7 +29,9 @@ const base = import.meta.env.BASE_URL
     <Nav />
     <main>
       <Hero />
+      <Paths />
       <Features />
+      <Demo />
       <Download />
       <Plugins />
       <Guide />
