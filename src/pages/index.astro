@@ -24,6 +24,31 @@ const base = import.meta.env.BASE_URL
     <meta property="og:description" content={`${site.slogan} —— ${site.description}`} />
     <link rel="icon" href={`${base}pupurin-logo.png`} />
     <title>{site.name} · {site.nameEn} — {site.slogan}</title>
+    <!-- 防 FOUC：首帧前应用已保存的外观（深/浅色 + 配色） -->
+    <script is:inline>
+      (function () {
+        var KEY = 'loom-appearance'
+        var PRESETS = [
+          { id: 'gold', dark: ['#FFE4A6', '#8a7a4a'], light: ['#b07d2e', '#a08a5a'] },
+          { id: 'sakura', dark: ['#ffc9d4', '#8f5a68'], light: ['#d96a85', '#b0566e'] },
+          { id: 'ocean', dark: ['#9fd8ff', '#4a7a9a'], light: ['#2f7fc1', '#2a6a9a'] },
+          { id: 'forest', dark: ['#a8e0b0', '#4a8a58'], light: ['#3f8f52', '#3a7a4a'] },
+          { id: 'sunset', dark: ['#ffb38a', '#9a6a48'], light: ['#d2691e', '#b05a1e'] },
+          { id: 'violet', dark: ['#d4b3ff', '#6a5a9a'], light: ['#7a4fc4', '#6640a0'] },
+        ]
+        try {
+          var s = JSON.parse(localStorage.getItem(KEY) || '{}') || {}
+          var mode = s.mode === 'light' ? 'light' : 'dark'
+          var preset = PRESETS.some(function (p) { return p.id === s.preset }) ? s.preset : 'gold'
+          var root = document.documentElement
+          root.dataset.theme = mode
+          var p = PRESETS.filter(function (x) { return x.id === preset })[0] || PRESETS[0]
+          var c = mode === 'dark' ? p.dark : p.light
+          root.style.setProperty('--accent', c[0])
+          root.style.setProperty('--accent-dim', c[1])
+        } catch (e) {}
+      })()
+    </script>
   </head>
   <body>
     <Nav />

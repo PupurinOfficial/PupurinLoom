@@ -3,6 +3,17 @@ import { site, nav } from '../config'
 import Icon from './Icon.astro'
 
 const base = import.meta.env.BASE_URL
+// 配色预设（复刻 APP 的 THEME_PRESETS）：dark / light 各为 [accent, accentDim]
+const PRESETS = [
+  { id: 'gold', name: 'appear.gold', dark: ['#FFE4A6', '#8a7a4a'], light: ['#b07d2e', '#a08a5a'] },
+  { id: 'sakura', name: 'appear.sakura', dark: ['#ffc9d4', '#8f5a68'], light: ['#d96a85', '#b0566e'] },
+  { id: 'ocean', name: 'appear.ocean', dark: ['#9fd8ff', '#4a7a9a'], light: ['#2f7fc1', '#2a6a9a'] },
+  { id: 'forest', name: 'appear.forest', dark: ['#a8e0b0', '#4a8a58'], light: ['#3f8f52', '#3a7a4a'] },
+  { id: 'sunset', name: 'appear.sunset', dark: ['#ffb38a', '#9a6a48'], light: ['#d2691e', '#b05a1e'] },
+  { id: 'violet', name: 'appear.violet', dark: ['#d4b3ff', '#6a5a9a'], light: ['#7a4fc4', '#6640a0'] },
+]
+// 色块标签的中文兜底（i18n 脚本运行前不显示 key）
+const NAME_ZH: Record<string, string> = { gold: '铃金', sakura: '樱粉', ocean: '海青', forest: '森绿', sunset: '落日橙', violet: '星紫' }
 ---
 <nav class="site-nav">
   <a class="nav-brand" href="#top">
@@ -20,8 +31,122 @@ const base = import.meta.env.BASE_URL
         <button type="button" data-lang-opt="en">English</button>
       </div>
     </div>
+    <div class="nav-appear" data-appear-wrap>
+      <button type="button" class="nav-appear-btn" data-appear-btn aria-label="Appearance" aria-haspopup="true" aria-expanded="false">
+        <Icon name="palette" size={16} />
+      </button>
+      <div class="nav-appear-menu" data-appear-menu hidden>
+        <span class="appear-label" data-i18n="appear.title">外观</span>
+        <div class="appear-modes">
+          <button type="button" class="appear-mode is-on" data-mode="dark" data-i18n="appear.dark">深色</button>
+          <button type="button" class="appear-mode" data-mode="light" data-i18n="appear.light">浅色</button>
+        </div>
+        <div class="appear-schemes">
+          {PRESETS.map((p) => (
+            <button type="button" class="appear-swatch" data-preset={p.id}>
+              <span class="appear-dot" style={`background:${p.dark[0]}`}></span>
+              <span data-i18n={p.name}>{NAME_ZH[p.id]}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
     <a class="nav-gh" href={site.urls.appRepo} target="_blank" rel="noopener">
       <Icon name="github" size={15} /> GitHub
     </a>
   </div>
 </nav>
+
+<script>
+  // 外观设置（深/浅色 + 配色），与 APP 的主题设置保持一致
+  const APPEAR_KEY = 'loom-appearance'
+  const PRESETS: { id: string; dark: string[]; light: string[] }[] = [
+    { id: 'gold', dark: ['#FFE4A6', '#8a7a4a'], light: ['#b07d2e', '#a08a5a'] },
+    { id: 'sakura', dark: ['#ffc9d4', '#8f5a68'], light: ['#d96a85', '#b0566e'] },
+    { id: 'ocean', dark: ['#9fd8ff', '#4a7a9a'], light: ['#2f7fc1', '#2a6a9a'] },
+    { id: 'forest', dark: ['#a8e0b0', '#4a8a58'], light: ['#3f8f52', '#3a7a4a'] },
+    { id: 'sunset', dark: ['#ffb38a', '#9a6a48'], light: ['#d2691e', '#b05a1e'] },
+    { id: 'violet', dark: ['#d4b3ff', '#6a5a9a'], light: ['#7a4fc4', '#6640a0'] },
+  ]
+
+  const wrap = document.querySelector<HTMLElement>('[data-appear-wrap]')
+  const btn = document.querySelector<HTMLElement>('[data-appear-btn]')
+  const menu = document.querySelector<HTMLElement>('[data-appear-menu]')
+
+  function loadState(): { mode: 'dark' | 'light'; preset: string } {
+    try {
+      const s = JSON.parse(localStorage.getItem(APPEAR_KEY) || '{}') as Record<string, string>
+      return {
+        mode: s.mode === 'light' ? 'light' : 'dark',
+        preset: PRESETS.some((p) => p.id === s.preset) ? s.preset : 'gold',
+      }
+    } catch {
+      return { mode: 'dark', preset: 'gold' }
+    }
+  }
+
+  function saveState(s: { mode: string; preset: string }) {
+    try {
+      localStorage.setItem(APPEAR_KEY, JSON.stringify(s))
+    } catch {
+      /* 隐私模式等场景下忽略 */
+    }
+  }
+
+  // 应用到 <html data-theme> + CSS 变量（--accent-soft 由 color-mix 自动跟随）
+  function apply(s: { mode: 'dark' | 'light'; preset: string }) {
+    const root = document.documentElement
+    root.dataset.theme = s.mode
+    const p = PRESETS.find((x) => x.id === s.preset) ?? PRESETS[0]
+    const [accent, dim] = s.mode === 'dark' ? p.dark : p.light
+    root.style.setProperty('--accent', accent)
+    root.style.setProperty('--accent-dim', dim)
+  }
+
+  function syncUI(s: { mode: string; preset: string }) {
+    menu?.querySelectorAll<HTMLElement>('[data-mode]').forEach((m) => {
+      m.classList.toggle('is-on', m.dataset.mode === s.mode)
+    })
+    menu?.querySelectorAll<HTMLElement>('[data-preset]').forEach((sw) => {
+      sw.classList.toggle('is-on', sw.dataset.preset === s.preset)
+    })
+  }
+
+  if (wrap && btn && menu) {
+    const state = loadState()
+    apply(state)
+    syncUI(state)
+
+    btn.addEventListener('click', () => {
+      const open = menu.hidden
+      menu.hidden = !open
+      btn.setAttribute('aria-expanded', String(open))
+    })
+
+    // 点击面板外部关闭
+    document.addEventListener('click', (e) => {
+      if (!menu.hidden && !wrap.contains(e.target as Node)) {
+        menu.hidden = true
+        btn.setAttribute('aria-expanded', 'false')
+      }
+    })
+
+    menu.querySelectorAll<HTMLElement>('[data-mode]').forEach((m) => {
+      m.addEventListener('click', () => {
+        state.mode = m.dataset.mode === 'light' ? 'light' : 'dark'
+        apply(state)
+        saveState(state)
+        syncUI(state)
+      })
+    })
+
+    menu.querySelectorAll<HTMLElement>('[data-preset]').forEach((sw) => {
+      sw.addEventListener('click', () => {
+        state.preset = sw.dataset.preset ?? 'gold'
+        apply(state)
+        saveState(state)
+        syncUI(state)
+      })
+    })
+  }
+</script>

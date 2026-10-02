@@ -11,6 +11,16 @@ const zh: Record<string, string> = {
   'hero.download': '立即下载',
   'hero.tryDemo': '体验编辑器',
   'hero.guide': '快速上手',
+  // 外观设置（导航栏）
+  'appear.title': '外观',
+  'appear.dark': '深色',
+  'appear.light': '浅色',
+  'appear.gold': '铃金',
+  'appear.sakura': '樱粉',
+  'appear.ocean': '海青',
+  'appear.forest': '森绿',
+  'appear.sunset': '落日橙',
+  'appear.violet': '星紫',
   // 受众定位
   'paths.title': '谁为织者？',
   'paths.sub': '写给个人与同人创作者的轻量舞台 —— 一人、一晚、一个小故事，也能织成一部完整作品。',
@@ -76,7 +86,7 @@ nav.forEach((n) => {
 })
 zh['site.name'] = site.name
 zh['hero.desc'] = site.description
-zh['about.p1'] = `${site.name}（${site.nameEn}）是仆仆铃°工作室出品的可视化 Ren'Py 开发工具，以「${site.slogan}」为理念，希望让文字冒险游戏的创作像织布一样从容。`
+zh['about.p1'] = `${site.name}（${site.nameEn}）是仆仆铃°工作室出品的可视化 Ren'Py 开发工具，以「${site.slogan}」为理念，希望让视觉小说游戏的创作像织布一样从容。`
 zh['about.p2'] = `项目以 ${site.license} 开源，代码与发行版均托管在 GitHub；插件生态经由独立仓库维护，欢迎任何人提交插件。`
 features.forEach((f) => {
   zh[`feature.${f.icon}.title`] = f.title
@@ -123,6 +133,16 @@ const en: Record<string, string> = {
   'hero.download': 'Download',
   'hero.tryDemo': 'Try the Editor',
   'hero.guide': 'Quick Start',
+  // 外观设置（导航栏）
+  'appear.title': 'Appearance',
+  'appear.dark': 'Dark',
+  'appear.light': 'Light',
+  'appear.gold': 'Gold',
+  'appear.sakura': 'Sakura',
+  'appear.ocean': 'Ocean',
+  'appear.forest': 'Forest',
+  'appear.sunset': 'Sunset',
+  'appear.violet': 'Violet',
   // 受众定位
   'paths.title': 'Who is the weaver?',
   'paths.sub':
@@ -235,7 +255,7 @@ const en: Record<string, string> = {
   'download.slide.3.t2': 'Loom° Delivers',
   'download.slide.3.desc': 'A third-party Android beta is now available — visit the repository:',
   'download.slide.3.extra':
-    '° The Android version is developed and maintained by a third party. Pupurin° Studio makes no guarantees about its updates, security, completeness, or runnability.',
+    '° The Android version is developed and maintained by a third party. Pupurin° makes no guarantees about its updates, security, completeness, or runnability.',
   // 插件区
   'plugins.title': 'Plugin Ecosystem',
   'plugins.sub':
@@ -259,9 +279,9 @@ const en: Record<string, string> = {
     'Point to your Ren\'Py SDK and package a distributable game in one click.',
   // 关于
   'about.title': 'About',
-  'about.subtitle': 'Pupurin° Studio',
+  'about.subtitle': 'Pupurin°',
   'about.p1':
-    'Pupurin° Loom is a visual Ren\'Py development tool by Pupurin°, with the motto 「Pupurin spins, stories begin.」 — making visual novel creation as effortless as weaving.',
+    'Pupurin° Loom is a visual Ren\'Py development tool by Pupurin°, with the motto 「Pupurin spins, stories begin.」 — making Galgame creation as effortless as weaving.',
   'about.p2':
     'Open-sourced under the MIT License, the code and releases are hosted on GitHub; the plugin ecosystem lives in a separate repository — contributions are welcome.',
   'about.qq': 'Tencent Channel',
