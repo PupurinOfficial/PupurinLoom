@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
-import type { BlockType } from '../utils/dialogueParser'
+import type { BlockType, DialogueBlock } from '../utils/dialogueParser'
 
 interface CommandItem {
   type: BlockType
@@ -7,6 +7,8 @@ interface CommandItem {
   description: string
   icon: JSX.Element
   keywords: string[]
+  /** 新建块时的预设字段（如特效默认值） */
+  defaults?: Partial<DialogueBlock>
 }
 
 interface CommandCategory {
@@ -253,6 +255,30 @@ const CATEGORIES: CommandCategory[] = [
     ],
   },
   {
+    id: 'effect',
+    label: '特效',
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" width="16" height="16">
+        <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" />
+        <circle cx="12" cy="12" r="3" />
+      </svg>
+    ),
+    items: [
+      {
+        type: 'effect',
+        label: '全局特效',
+        description: '转场 / 震动 / 闪光（with 语句），添加后在编辑器中挑选具体特效',
+        icon: (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" width="18" height="18">
+            <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+        ),
+        keywords: ['effect', '特效', 'with', '转场', '震动', '闪光'],
+      },
+    ],
+  },
+  {
     id: 'tools',
     label: '工具',
     icon: (
@@ -303,7 +329,7 @@ const CATEGORIES: CommandCategory[] = [
 interface CommandPaletteProps {
   open: boolean
   onClose: () => void
-  onSelect: (type: BlockType) => void
+  onSelect: (type: BlockType, defaults?: Partial<DialogueBlock>) => void
   anchorRect?: DOMRect | null
 }
 
@@ -351,9 +377,11 @@ export default function CommandPalette({ open, onClose, onSelect, anchorRect }: 
     setSelectedIdx(0)
   }, [activeCategory, search, open])
 
-  // 聚焦搜索框
+  // 打开时重置搜索词与选中项（避免上次的关键词过滤残留到其他分类）
   useEffect(() => {
     if (open) {
+      setSearch('')
+      setSelectedIdx(0)
       setTimeout(() => searchInputRef.current?.focus(), 50)
     }
   }, [open])
@@ -374,7 +402,7 @@ export default function CommandPalette({ open, onClose, onSelect, anchorRect }: 
         e.preventDefault()
         const item = filteredItems[selectedIdx]
         if (item) {
-          onSelect(item.type)
+          onSelect(item.type, item.defaults)
           onClose()
         }
       }
@@ -452,7 +480,7 @@ export default function CommandPalette({ open, onClose, onSelect, anchorRect }: 
                 key={item.type}
                 onMouseEnter={() => setSelectedIdx(i)}
                 onClick={() => {
-                  onSelect(item.type)
+                  onSelect(item.type, item.defaults)
                   onClose()
                 }}
                 className={[

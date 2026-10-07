@@ -569,8 +569,8 @@ async function resolveBuildsDir(projectPath: string): Promise<{ dir: string; use
   }
 }
 
-// 打包 Ren'Py 游戏
-ipcMain.handle('projects:packageGame', async (_e, projectPath: string, platform: string) => {
+// 打包 Ren'Py 游戏；scripts = 按版本方案过滤后的剧情文件覆盖（相对 game/ 路径，提供时在副本上打包）
+ipcMain.handle('projects:packageGame', async (_e, projectPath: string, platform: string, scripts?: Record<string, string>) => {
   const logs: string[] = []
   const log = (s: string): void => { logs.push(s) }
   try {
@@ -586,6 +586,16 @@ ipcMain.handle('projects:packageGame', async (_e, projectPath: string, platform:
     log(`正在打包 (${platform})...`)
     log(`SDK: ${sdk.exe}`)
     log(`项目: ${projectPath}`)
+
+    // 版本过滤：有过滤脚本时在项目副本上覆盖剧情文件再打包（不污染原项目）
+    let workDir: string | null = null
+    if (scripts && Object.keys(scripts).length > 0) {
+      const workBase = join(app.getPath('userData'), 'tmp-build')
+      await fs.mkdir(workBase, { recursive: true })
+      workDir = await copyProjectForBuild(projectPath, workBase)
+      await overlayFilteredScripts(workDir, scripts, log)
+      log('已复制项目到工作区并应用版本过滤')
+    }
 
     // 关键修复：Ren'Py 打包时会扫描整个项目目录（包括 builds/），且默认把所有未排除文件
     // 打进发行包。若 builds/ 下残留上次的打包产物，它们会被重新打进新包，导致体积、耗时
@@ -612,7 +622,7 @@ ipcMain.handle('projects:packageGame', async (_e, projectPath: string, platform:
     const args = [
       'launcher',
       'distribute',
-      projectPath,
+      workDir ?? projectPath,
       '--destination',
       buildsDir
     ]
@@ -681,6 +691,11 @@ ipcMain.handle('projects:packageGame', async (_e, projectPath: string, platform:
       await fs.rm(backupDir, { recursive: true, force: true })
       log('已清理旧的打包产物')
 
+      // 清理版本过滤工作区副本
+      if (workDir) {
+        try { await fs.rm(workDir, { recursive: true, force: true }) } catch { /* ignore */ }
+      }
+
       return { logs, buildsDir }
     } catch (e) {
       // 打包失败：恢复旧的打包产物，避免用户丢失历史构建
@@ -695,6 +710,10 @@ ipcMain.handle('projects:packageGame', async (_e, projectPath: string, platform:
           }
         }
       } catch { /* 恢复失败时保留 tmp 中的备份 */ }
+      // 清理版本过滤工作区副本
+      if (workDir) {
+        try { await fs.rm(workDir, { recursive: true, force: true }) } catch { /* ignore */ }
+      }
       throw e
     }
   } catch (e) {
@@ -916,8 +935,23 @@ async function copyProjectForBuild(projectPath: string, baseDir: string): Promis
   return dest
 }
 
+// 把按版本方案过滤后的剧情文件覆盖到打包工作区副本（scripts key = 相对 game/ 的路径）
+async function overlayFilteredScripts(workDir: string, scripts: Record<string, string> | undefined, log: (s: string) => void): Promise<void> {
+  if (!scripts) return
+  const entries = Object.entries(scripts)
+  if (entries.length === 0) return
+  for (const [rel, content] of entries) {
+    // 防止路径穿越（rel 以 ../ 开头时丢弃）
+    if (rel.startsWith('..') || rel.includes('/..')) continue
+    const dest = join(workDir, 'game', rel)
+    await fs.mkdir(dirname(dest), { recursive: true })
+    await fs.writeFile(dest, content, 'utf-8')
+  }
+  log(`已应用版本过滤（${entries.length} 个剧情文件）`)
+}
+
 // 网页打包：Ren'Py launcher web_build（HTML5/WebAssembly）
-ipcMain.handle('projects:packageWeb', async (_e, projectPath: string, opts: { version?: string; iconPath?: string | null; preview?: boolean }) => {
+ipcMain.handle('projects:packageWeb', async (_e, projectPath: string, opts: { version?: string; iconPath?: string | null; preview?: boolean; scripts?: Record<string, string> }) => {
   const logs: string[] = []
   const log = (s: string): void => { logs.push(s) }
   const workBase = join(app.getPath('userData'), 'tmp-build')
@@ -942,6 +976,7 @@ ipcMain.handle('projects:packageWeb', async (_e, projectPath: string, opts: { ve
     await fs.mkdir(workBase, { recursive: true })
     const workDir = await copyProjectForBuild(projectPath, workBase)
     log('已复制项目到可写工作区')
+    await overlayFilteredScripts(workDir, opts?.scripts, log)
 
     // 网页图标：复制到副本根目录 web-icon.png（官方要求 512x512 正方形）
     if (opts?.iconPath) {
@@ -1405,7 +1440,7 @@ async function ensureAndroidKeystores(workDir: string, log: (s: string) => void)
 }
 
 // 移动端打包：Android（RAPT）/ iOS（renios），与网页打包相同的副本打包方案
-ipcMain.handle('projects:packageMobile', async (_e, projectPath: string, opts: { target?: 'android' | 'ios'; bundle?: boolean; version?: string; packageName?: string; appName?: string }) => {
+ipcMain.handle('projects:packageMobile', async (_e, projectPath: string, opts: { target?: 'android' | 'ios'; bundle?: boolean; version?: string; packageName?: string; appName?: string; scripts?: Record<string, string> }) => {
   const logs: string[] = []
   const log = (s: string): void => { logs.push(s) }
   // 移动端打包工作区必须使用纯 ASCII 路径：RAPT 会把 keystore 的绝对路径写入
@@ -1472,6 +1507,7 @@ ipcMain.handle('projects:packageMobile', async (_e, projectPath: string, opts: {
     await fs.mkdir(workBase, { recursive: true })
     const workDir = await copyProjectForBuild(projectPath, workBase)
     log('已复制项目到可写工作区')
+    await overlayFilteredScripts(workDir, opts?.scripts, log)
     await ensureBuildVersion(workDir, version)
 
     // Android：项目级配置（android.json：包名 / 应用名 / 版本），自动生成，

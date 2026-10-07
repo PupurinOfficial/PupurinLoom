@@ -20,6 +20,7 @@ export type BlockType =
   | 'if'           // if 条件分支（合并 if/elif/else 链）
   | 'return'       // return 返回
   | 'voice'        // voice "voice/xxx.ogg"
+  | 'effect'       // with dissolve / with hpunch 等全局特效
   | 'command'      // 其他指令
   | 'comment'      // 注释
   | 'blank'        // 空行
@@ -56,6 +57,8 @@ export interface DialogueBlock {
   urlPath?: string
   // scene
   background?: string
+  /** 特效（with 转场/震动/闪光等）：show/scene/hide 后缀参数 或 独立 effect 块 */
+  transition?: string
   // show / hide
   showCharVar?: string
   showSprite?: string
@@ -77,6 +80,12 @@ export interface DialogueBlock {
   children?: DialogueBlock[]
   // voice 语音（dialogue 块使用；独立 voice 块也使用）
   voicePath?: string
+  /** 版本标签（r18 / 全年龄 / watch 等）：通过行内注释 `# loom: versions: a,b` 持久化，
+   *  导出时按版本方案静态过滤。空/undefined = 所有版本都包含。 */
+  versions?: string[]
+  /** 翻译 ID：Ren'Py 翻译工具追加在对话/旁白行尾的 `id xxx` 或 `# id xxx`，
+   *  原样保存（含前缀），序列化时回写，避免编辑时丢失翻译关联。 */
+  id?: string
 }
 
 export interface MenuOptionBlock {
@@ -84,6 +93,8 @@ export interface MenuOptionBlock {
   target: string | null
   line: number
   children?: DialogueBlock[]
+  /** 版本标签（同 DialogueBlock.versions），序列化为选项行内注释 */
+  versions?: string[]
 }
 
 // Ren'Py 关键字
@@ -95,8 +106,55 @@ const KEYWORDS = new Set([
   '$', 'window', 'voice',
 ])
 
-const DIALOGUE_RE = /^\s*([A-Za-z_]\w*)\s+(?:([A-Za-z_]\w*)\s+)?["'](.*?)["']\s*(?:#.*)?$/
-const NARRATION_RE = /^\s*["'](.*?)["']\s*(?:#.*)?$/
+// 官方内置转场特效的中文显示名（with 语句可直接使用）
+export const TRANSITION_LABELS: Record<string, string> = {
+  dissolve: '溶解淡入',
+  fade: '淡入淡出',
+  pixellate: '马赛克切换',
+  move: '位置移动',
+  moveinright: '右侧滑入',
+  moveinleft: '左侧滑入',
+  moveintop: '顶部滑入',
+  moveinbottom: '底部滑入',
+  moveoutright: '右移出场',
+  moveoutleft: '左移出场',
+  ease: '平滑移动',
+  zoomin: '放大显现',
+  zoomout: '缩小消失',
+  zoominout: '放大再缩小',
+  hpunch: '水平震动',
+  vpunch: '垂直震动',
+  blinds: '百叶窗',
+  squares: '方块切换',
+  wipeleft: '向左擦除',
+  wiperight: '向右擦除',
+  wipeup: '向上擦除',
+  wipedown: '向下擦除',
+  slideleft: '向左滑过',
+  slideright: '向右滑过',
+  slideawayleft: '向左滑出',
+  slideawayright: '向右滑出',
+  pushleft: '向左推入',
+  pushright: '向右推入',
+  pushup: '向上推入',
+  pushdown: '向下推入',
+  irisin: '聚拢显现',
+  irisout: '扩散消失',
+}
+
+// 获取特效的中文显示名；未知（用户自定义）返回 undefined，由调用方回退显示原始表达式
+export function getTransitionLabel(raw?: string): string | undefined {
+  if (!raw) return undefined
+  const key = raw.trim()
+  return TRANSITION_LABELS[key] ?? undefined
+}
+
+// 行尾可带翻译 ID（`id xxx` 或 `# id xxx`），捕获组保存完整 id 串（含可选 # 前缀）
+const DIALOGUE_RE = /^\s*([A-Za-z_]\w*)\s+(?:([A-Za-z_]\w*)\s+)?["'](.*?)["']\s*(?:((?:#\s*)?id\s+\S+)\s*)?(?:#.*)?$/
+// 带引号角色名的对话：`"路人" "text"` / `"路人" happy "text"`（Ren'Py 允许中文等非标识符角色名）
+// 必须在 NARRATION_RE 之前匹配，否则会被旁白正则吞并改写
+const DIALOGUE_QUOTED_RE = /^\s*(["'])([^"']{1,30})\1\s+(?:([A-Za-z_]\w*)\s+)?(["'])(.*?)\4\s*(?:((?:#\s*)?id\s+\S+)\s*)?(?:#.*)?$/
+const NARRATION_RE = /^\s*["'](.*?)["']\s*(?:((?:#\s*)?id\s+\S+)\s*)?(?:#.*)?$/
 const LABEL_RE = /^\s*label\s+([A-Za-z_]\w*)\s*(?:\((.*?)\))?\s*:\s*(?:#.*)?$/
 const JUMP_RE = /^\s*jump\s+([A-Za-z_]\w*)\s*(?:#.*)?$/
 const CALL_RE = /^\s*call\s+([A-Za-z_]\w*)\s*(?:#.*)?$/
@@ -117,14 +175,19 @@ const MOVIE_RE = /^\s*\$\s*renpy\.movie_cutscene\s*\(\s*["'](.+?)["']\s*\)\s*(?:
 const OPEN_URL_RE = /^\s*\$\s*renpy\.open_url\s*\(\s*["'](.+?)["']\s*\)\s*(?:#.*)?$/
 
 // scene background  [with transition]
-const SCENE_RE = /^\s*scene\s+([A-Za-z_]\w*)\s*(?:with\s+\w+)?\s*(?:#.*)?$/
+const SCENE_RE = /^\s*scene\s+([A-Za-z_]\w*)\s*(?:with\s+(\S+))?\s*(?:#.*)?$/
 
 // show/hide 目标可为角色（char var）或图片名（画廊CG，可含空格/中文）。
 // 解析时统一按「首词 + 次词」拆（角色/CG 代码层面等价，CG 识别交给 UI 层）。
-const SHOW_RE = /^\s*show\s+(\S+)(?:\s+(\S+))?(?:\s+with\s+\S+)?\s*(?:#.*)?$/
+// 末尾可选 with 特效：show e happy with dissolve（次词负向前瞻避免吞掉 with）
+const SHOW_RE = /^\s*show\s+(\S+)(?:\s+(?!with\b)(\S+))?(?:\s+with\s+(\S+))?\s*(?:#.*)?$/
 
 // hide charVar [sprite]  [with transition]
-const HIDE_RE = /^\s*hide\s+(\S+)(?:\s+(\S+))?(?:\s+with\s+\S+)?\s*(?:#.*)?$/
+const HIDE_RE = /^\s*hide\s+(\S+)(?:\s+(?!with\b)(\S+))?(?:\s+with\s+(\S+))?\s*(?:#.*)?$/
+
+// 独立全局特效：with dissolve / with hpunch / with Fade(0.1, 0.0, 0.5, color="#fff")
+// 注释须以空白分隔（避免把 color="#fff" 中的 # 误判为注释）
+const WITH_RE = /^\s*with\s+(.+?)(?:\s+#.*)?$/
 
 // default varName = value
 const DEFAULT_RE = /^\s*default\s+([A-Za-z_]\w*)\s*=\s*(.+?)\s*(?:#.*)?$/
@@ -139,8 +202,46 @@ function leadingSpaces(line: string): number {
   return line.length - line.replace(/^\s+/, '').length
 }
 
+/** 解析行内 `# loom:` 标记（可同时含类型标记与版本标签）：
+ *  例：`# loom:sprite versions: r18,watch` / `# loom: versions: 全年龄`
+ *  返回 showKind（sprite/cg，show/hide 专用）与版本标签数组。 */
+export function parseLoomTags(raw: string): { showKind?: 'sprite' | 'cg'; versions?: string[] } {
+  const m = /#\s*loom:\s*([^#\n]*?)\s*$/.exec(raw)
+  if (!m) return {}
+  const tokens = m[1].trim().split(/\s+/).filter(Boolean)
+  const out: { showKind?: 'sprite' | 'cg'; versions?: string[] } = {}
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i]
+    if (t === 'sprite' || t === 'cg') {
+      out.showKind = t
+    } else if (t === 'versions:' || t === 'versions') {
+      const list: string[] = []
+      let j = i + 1
+      // 收集后续 token 直到下一个含冒号的 key（如 sprite/cg 或新的 xxx:）
+      while (j < tokens.length && !tokens[j].includes(':')) {
+        list.push(...tokens[j].split(/[,，]/).map((s) => s.trim()).filter(Boolean))
+        j++
+      }
+      if (list.length > 0) out.versions = list
+    }
+  }
+  return out
+}
+
+// 给解析出的块回填 # loom: 中的版本/类型信息（show/hide 额外回填 showKind/showExplicit）
+function withLoom<T extends DialogueBlock>(block: T, line: string): T {
+  const loom = parseLoomTags(line)
+  if (loom.showKind && (block.type === 'show' || block.type === 'hide')) {
+    return { ...block, showKind: loom.showKind, showExplicit: true, versions: loom.versions }
+  }
+  if (loom.versions) {
+    return { ...block, versions: loom.versions }
+  }
+  return block
+}
+
 // 解析单行内容为 block（不包含子内容）
-function parseLine(line: string, lineNum: number): DialogueBlock | null {
+function parseLineInner(line: string, lineNum: number): DialogueBlock | null {
   // 注释或空行
   if (COMMENT_RE.test(line)) {
     return {
@@ -172,7 +273,13 @@ function parseLine(line: string, lineNum: number): DialogueBlock | null {
 
   const scm = line.match(SCENE_RE)
   if (scm) {
-    return { type: 'scene', line: lineNum, raw: line, background: scm[1] }
+    return { type: 'scene', line: lineNum, raw: line, background: scm[1], transition: scm[2] }
+  }
+
+  // 独立全局特效（with xxx）：优先于 show/hide 之外识别
+  const wm = line.match(WITH_RE)
+  if (wm) {
+    return { type: 'effect', line: lineNum, raw: line, transition: wm[1].trim() }
   }
 
   const shm = line.match(SHOW_RE)
@@ -184,6 +291,7 @@ function parseLine(line: string, lineNum: number): DialogueBlock | null {
       raw: line,
       showCharVar: shm[1],
       showSprite: shm[2],
+      transition: shm[3],
       showKind: loomKind ? (loomKind[1] as 'sprite' | 'cg') : undefined,
       showExplicit: loomKind ? true : undefined,
     }
@@ -198,6 +306,7 @@ function parseLine(line: string, lineNum: number): DialogueBlock | null {
       raw: line,
       showCharVar: hdm[1],
       showSprite: hdm[2],
+      transition: hdm[3],
       showKind: loomKind ? (loomKind[1] as 'sprite' | 'cg') : undefined,
       showExplicit: loomKind ? true : undefined,
     }
@@ -233,16 +342,36 @@ function parseLine(line: string, lineNum: number): DialogueBlock | null {
 
   const dm = line.match(DIALOGUE_RE)
   if (dm && !KEYWORDS.has(dm[1])) {
-    return { type: 'dialogue', line: lineNum, raw: line, charVar: dm[1], sprite: dm[2], text: dm[3] }
+    return { type: 'dialogue', line: lineNum, raw: line, charVar: dm[1], sprite: dm[2], text: dm[3], id: dm[4] }
+  }
+
+  // 带引号角色名（如 `"路人" "text"`）：charVar 保存完整引号串以便原样回写
+  const qdm = line.match(DIALOGUE_QUOTED_RE)
+  if (qdm) {
+    return {
+      type: 'dialogue',
+      line: lineNum,
+      raw: line,
+      charVar: `${qdm[1]}${qdm[2]}${qdm[1]}`,
+      sprite: qdm[3],
+      text: qdm[5],
+      id: qdm[6],
+    }
   }
 
   const nm = line.match(NARRATION_RE)
   if (nm) {
-    return { type: 'narration', line: lineNum, raw: line, text: nm[1] }
+    return { type: 'narration', line: lineNum, raw: line, text: nm[1], id: nm[2] }
   }
 
   // 无法识别的行作为 command
   return { type: 'command', line: lineNum, raw: line }
+}
+
+// parseLineInner + 行内 # loom: 标记回填（versions 对所有块类型生效）
+function parseLine(line: string, lineNum: number): DialogueBlock | null {
+  const block = parseLineInner(line, lineNum)
+  return block ? withLoom(block, line) : null
 }
 
 // 递归解析 blocks，支持嵌套结构
@@ -286,6 +415,7 @@ function parseBlocks(lines: string[], startIdx: number, baseIndent: number): { b
             sprite: dm[2],
             text: dm[3],
             voicePath: voiceMatch[1],
+            id: dm[4],
           })
           i = j + 1
           merged = true
@@ -303,11 +433,13 @@ function parseBlocks(lines: string[], startIdx: number, baseIndent: number): { b
     const ifMatch = line.match(IF_RE)
     if (ifMatch) {
       const ifIndent = indent
+      const ifLoom = parseLoomTags(line)
       const ifBlock: DialogueBlock = {
         type: 'if',
         line: lineNum,
         raw: line,
         branches: [],
+        versions: ifLoom.versions,
       }
       i++
 
@@ -370,11 +502,13 @@ function parseBlocks(lines: string[], startIdx: number, baseIndent: number): { b
     const menuMatch = line.match(MENU_RE)
     if (menuMatch) {
       const menuIndent = indent
+      const menuLoom = parseLoomTags(line)
       const menuBlock: DialogueBlock = {
         type: 'menu',
         line: lineNum,
         raw: line,
         options: [],
+        versions: menuLoom.versions,
       }
       i++
 
@@ -395,11 +529,13 @@ function parseBlocks(lines: string[], startIdx: number, baseIndent: number): { b
 
         const optMatch = optLine.match(MENU_OPTION_RE)
         if (optMatch) {
+          const optLoom = parseLoomTags(optLine)
           const opt: MenuOptionBlock = {
             text: optMatch[1],
             target: optMatch[2] ?? null,
             line: optLineNum,
             children: [],
+            versions: optLoom.versions,
           }
           i++
 

@@ -7,6 +7,7 @@ import StoryProperties, { usePropsHeader } from './StoryProperties'
 import PluginPanelView from './PluginPanelView'
 import PluginIcon from './PluginIcon'
 import UiDesignerPanel from '../uiDesigner/UiDesignerPanel'
+import VersionSchemePanel from './VersionSchemePanel'
 
 // ---- 右侧「功能栏」----
 // 常驻一条小图标栏（所有页面可见），点击图标展开对应侧边栏（至多 1 个），再点收起。
@@ -187,11 +188,18 @@ export default function FunctionBar() {
       icon: <UiDesignIcon />,
       render: () => <UiDesignerPanel />,
     },
+    {
+      id: 'package-versions',
+      title: '版本方案',
+      icon: <VersionsIcon />,
+      render: () => <VersionSchemePanel />,
+    },
   ]
   const scopes: Record<string, ViewId[]> = {
     'script-props': ['script'],
     'resource-detail': ['resources'],
     'ui-designer': ['ui'],
+    'package-versions': ['package'],
   }
   // 织机内属性面板仅故事文件显示（代码文件时隐藏图标并自动收起）
   const pageVisible = (id: string): boolean => {
@@ -343,6 +351,18 @@ function UiDesignIcon() {
       <rect x="3" y="4" width="18" height="16" rx="2" />
       <path d="M3 9h18M9 9v11" />
       <path d="M14.5 13.5l3.2 4.1M17.5 18.5l1.8 1.8" />
+    </svg>
+  )
+}
+
+// 版本方案图标（多标签）
+function VersionsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="20" height="20">
+      <path d="M20 8h-3V4H3c-1.1 0-2 .9-2 2v11h2a3 3 0 106 0h6a3 3 0 106 0h2V10l-3-2z" />
+      <circle cx="7" cy="17" r="1.2" />
+      <circle cx="17" cy="17" r="1.2" />
+      <path d="M9 8h9v4H9z" />
     </svg>
   )
 }

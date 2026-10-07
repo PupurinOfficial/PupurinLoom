@@ -226,11 +226,11 @@ declare global {
       runGame: (projectPath: string) => Promise<{ success: boolean; error?: string }>
       // 从指定文件+行号开始运行（Ren'Py --warp）
       runGameFromLine: (projectPath: string, filePath: string, line: number) => Promise<{ success: boolean; error?: string }>
-      packageGame: (projectPath: string, platform: string) => Promise<{ logs: string[]; buildsDir?: string }>
-      // 网页打包（HTML5/WebAssembly）
-      packageWeb: (projectPath: string, opts?: { version?: string; iconPath?: string | null; preview?: boolean }) => Promise<{ logs: string[]; webDir?: string; previewUrl?: string | null }>
+      packageGame: (projectPath: string, platform: string, scripts?: Record<string, string>) => Promise<{ logs: string[]; buildsDir?: string }>
+      // 网页打包（HTML5/WebAssembly）；scripts = 按版本方案过滤后的剧情文件覆盖（相对 game/ 路径）
+      packageWeb: (projectPath: string, opts?: { version?: string; iconPath?: string | null; preview?: boolean; scripts?: Record<string, string> }) => Promise<{ logs: string[]; webDir?: string; previewUrl?: string | null }>
       // 移动端打包：Android（APK/AAB）/ iOS
-      packageMobile: (projectPath: string, opts?: { target?: 'android' | 'ios'; bundle?: boolean; version?: string; packageName?: string; appName?: string }) => Promise<{ logs: string[]; outDir?: string }>
+      packageMobile: (projectPath: string, opts?: { target?: 'android' | 'ios'; bundle?: boolean; version?: string; packageName?: string; appName?: string; scripts?: Record<string, string> }) => Promise<{ logs: string[]; outDir?: string }>
       // Ren'Py SDK 引导
       sdkStatus: () => Promise<{ found: boolean; exe: string | null; sdkDir: string | null; platform: string; downloadUrl: string; webOk: boolean; androidOk: boolean; iosOk: boolean; androidSdkOk: boolean; jdkOk: boolean; xcodeOk: boolean; sdkWritable: boolean }>
       // 打开 macOS「完全磁盘访问权限」设置页

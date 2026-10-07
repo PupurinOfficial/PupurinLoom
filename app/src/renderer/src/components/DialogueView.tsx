@@ -1,7 +1,9 @@
-import { useMemo, useState, useRef, useCallback, useEffect, Fragment, type KeyboardEvent } from 'react'
+import { useMemo, useState, useRef, useCallback, useEffect, Fragment, memo, type KeyboardEvent } from 'react'
 import { useStore } from '../store/useStore'
+import { useVersionSchemes } from '../store/versionSchemes'
 import { usePlugins } from '../store/plugins'
-import { parseDialogue, classifyShowBlocks, computeCharSpriteStates, type DialogueBlock, type CharSpriteState, type BlockType, type IfBranch } from '../utils/dialogueParser'
+import TagDropdown from './TagDropdown'
+import { parseDialogue, classifyShowBlocks, computeCharSpriteStates, getTransitionLabel, type DialogueBlock, type CharSpriteState, type BlockType, type IfBranch } from '../utils/dialogueParser'
 import { parseRenpyText, styleToCss, type TextStyle } from '../utils/renpyTextParser'
 import { extractVarNames } from '../utils/varExtractor'
 import { useProjectImage, useProjectImagePaths } from '../hooks/useProjectImage'
@@ -19,9 +21,9 @@ import {
   addChildBlock,
   removeChildBlock,
   updateBlockDeep,
-  addBranch,
-  updateBranchCondition,
-  removeBranch,
+  addBranchDeep,
+  updateBranchConditionDeep,
+  removeBranchDeep,
 } from '../utils/blockSerializer'
 
 interface DialogueViewProps {
@@ -71,6 +73,14 @@ export default function DialogueView({ source, onChange, lineBaseOffset = 1, onP
     () => classifyShowBlocks(parseDialogue(source), cgImages, otherNames),
     [source, cgImages, otherNames]
   )
+
+  // 版本标签颜色注册表（与打包发布页共享）；切换项目时加载
+  const projectPath = useStore((s) => s.currentProject?.path ?? '')
+  const vsLoad = useVersionSchemes((s) => s.load)
+  useEffect(() => {
+    if (projectPath) vsLoad(projectPath)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectPath])
 
   // 顶层块容器 ref，用于 focusLine 定位滚动
   const blockRefs = useRef<(HTMLDivElement | null)[]>([])
@@ -129,15 +139,17 @@ export default function DialogueView({ source, onChange, lineBaseOffset = 1, onP
   const commitBlocks = useCallback(
     (newBlocks: DialogueBlock[]) => {
       const newSource = serializeBlocks(newBlocks)
-      onChange?.(newSource)
+      // 保留原始换行符（CRLF/LF），避免保存时整文件行尾被改写
+      const eol = source.includes('\r\n') ? '\r\n' : '\n'
+      onChange?.(eol === '\r\n' ? newSource.replace(/\r?\n/g, '\r\n') : newSource)
     },
-    [onChange]
+    [onChange, source]
   )
 
   // 添加新 block（顶层）
   const handleAddBlock = useCallback(
-    (type: BlockType, afterIdx: number) => {
-      const newBlock = createBlock(type, afterIdx + 1)
+    (type: BlockType, afterIdx: number, defaults?: Partial<DialogueBlock>) => {
+      const newBlock = createBlock(type, afterIdx + 1, defaults)
       const newBlocks = insertBlockAfter(blocks, afterIdx, newBlock)
       commitBlocks(newBlocks)
       setEditingIdx(afterIdx + 1)
@@ -167,8 +179,8 @@ export default function DialogueView({ source, onChange, lineBaseOffset = 1, onP
 
   // 嵌套：添加子 block
   const handleAddChild = useCallback(
-    (type: BlockType, path: number[], afterChildIdx: number) => {
-      const newBlock = createBlock(type, 0)
+    (type: BlockType, path: number[], afterChildIdx: number, defaults?: Partial<DialogueBlock>) => {
+      const newBlock = createBlock(type, 0, defaults)
       const newBlocks = addChildBlock(blocks, path, afterChildIdx, newBlock)
       commitBlocks(newBlocks)
       // 设置编辑路径
@@ -203,27 +215,28 @@ export default function DialogueView({ source, onChange, lineBaseOffset = 1, onP
   )
 
   // 添加 elif/else 分支
+  // 添加 elif/else 分支（深路径：ifPath = if 块所在路径，顶层 [i]，嵌套如 [2,0,0]）
   const handleAddBranch = useCallback(
-    (blockIdx: number, branchType: 'elif' | 'else') => {
-      const newBlocks = addBranch(blocks, blockIdx, branchType)
+    (ifPath: number[], branchType: 'elif' | 'else') => {
+      const newBlocks = addBranchDeep(blocks, ifPath, branchType)
       commitBlocks(newBlocks)
     },
     [blocks, commitBlocks]
   )
 
-  // 更新分支条件
+  // 更新分支条件（深路径）
   const handleUpdateBranchCondition = useCallback(
-    (blockIdx: number, branchIdx: number, condition: string) => {
-      const newBlocks = updateBranchCondition(blocks, blockIdx, branchIdx, condition)
+    (ifPath: number[], branchIdx: number, condition: string) => {
+      const newBlocks = updateBranchConditionDeep(blocks, ifPath, branchIdx, condition)
       commitBlocks(newBlocks)
     },
     [blocks, commitBlocks]
   )
 
-  // 删除分支
+  // 删除分支（深路径）
   const handleDeleteBranch = useCallback(
-    (blockIdx: number, branchIdx: number) => {
-      const newBlocks = removeBranch(blocks, blockIdx, branchIdx)
+    (ifPath: number[], branchIdx: number) => {
+      const newBlocks = removeBranchDeep(blocks, ifPath, branchIdx)
       commitBlocks(newBlocks)
     },
     [blocks, commitBlocks]
@@ -258,7 +271,7 @@ export default function DialogueView({ source, onChange, lineBaseOffset = 1, onP
         <CommandPalette
           open={paletteState.open}
           onClose={closePalette}
-          onSelect={(type) => handleAddBlock(type, paletteState.afterIdx)}
+          onSelect={(type, defaults) => handleAddBlock(type, paletteState.afterIdx, defaults)}
           anchorRect={paletteState.rect}
         />
       </div>
@@ -284,7 +297,7 @@ export default function DialogueView({ source, onChange, lineBaseOffset = 1, onP
             />
 
             {/* block 主体 */}
-            <BlockView
+            <MemoBlockView
               block={block}
               index={i}
               isEditing={editingIdx === i}
@@ -303,9 +316,9 @@ export default function DialogueView({ source, onChange, lineBaseOffset = 1, onP
               onEditChild={(childPath) => setEditingPath(childPath)}
               onStopEditChild={handleStopEditChild}
               editingPath={editingPath}
-              onAddBranch={(branchType) => handleAddBranch(i, branchType)}
-              onUpdateBranchCondition={(branchIdx, condition) => handleUpdateBranchCondition(i, branchIdx, condition)}
-              onDeleteBranch={(branchIdx) => handleDeleteBranch(i, branchIdx)}
+              onAddBranch={handleAddBranch}
+              onUpdateBranchCondition={handleUpdateBranchCondition}
+              onDeleteBranch={handleDeleteBranch}
             />
           </div>
           )
@@ -331,7 +344,7 @@ export default function DialogueView({ source, onChange, lineBaseOffset = 1, onP
       <CommandPalette
         open={nestedPaletteState.open}
         onClose={closeNestedPalette}
-        onSelect={(type) => handleAddChild(type, nestedPaletteState.path, nestedPaletteState.afterChildIdx)}
+        onSelect={(type, defaults) => handleAddChild(type, nestedPaletteState.path, nestedPaletteState.afterChildIdx, defaults)}
         anchorRect={nestedPaletteState.rect}
       />
     </div>
@@ -346,6 +359,21 @@ function arraysEqual(a: number[], b: number[]): boolean {
   }
   return true
 }
+
+// React.memo 比较器：path/ifPath/editingPath 等数组按内容比较（避免每次渲染的新数组引用击穿 memo），其余属性浅比较
+function memoEquals<T extends object>(prev: T, next: T): boolean {
+  for (const key of Object.keys(prev) as (keyof T)[]) {
+    const a = prev[key] as unknown
+    const b = next[key] as unknown
+    if (Array.isArray(a) && Array.isArray(b)) {
+      if (!arraysEqual(a as number[], b as number[])) return false
+    } else if (a !== b) return false
+  }
+  return true
+}
+
+// 稳定的空分支处理器（ChildBlockView 未传分支 props 时回退，避免每次渲染新建闭包）
+const NOOP_BRANCH = (): void => {}
 
 // 添加按钮
 function AddButton({
@@ -405,15 +433,16 @@ interface BlockViewProps {
   onEditChild: (path: number[]) => void
   onStopEditChild: () => void
   editingPath: number[] | null
-  onAddBranch: (branchType: 'elif' | 'else') => void
-  onUpdateBranchCondition: (branchIdx: number, condition: string) => void
-  onDeleteBranch: (branchIdx: number) => void
+  onAddBranch: (ifPath: number[], branchType: 'elif' | 'else') => void
+  onUpdateBranchCondition: (ifPath: number[], branchIdx: number, condition: string) => void
+  onDeleteBranch: (ifPath: number[], branchIdx: number) => void
 }
 
 function BlockView(props: BlockViewProps) {
   const { block, isEditing, onEdit, onDelete, onUpdate, onStopEdit, blocks, charStates,
     onAddChild, onDeleteChild, onUpdateChild, onEditChild, onStopEditChild, editingPath,
     onAddBranch, onUpdateBranchCondition, onDeleteBranch } = props
+  const tagColors = useVersionSchemes((s) => s.tagColors)
 
   // 编辑模式
   if (isEditing) {
@@ -441,10 +470,10 @@ function BlockView(props: BlockViewProps) {
       onDoubleClick={isContainerType ? undefined : onEdit}
       title={isContainerType ? undefined : '双击编辑'}
     >
-      <BlockContent
+      <MemoBlockContent
         block={block}
         charStates={charStates}
-        blockIndex={props.index}
+        path={[props.index]}
         onAddChild={onAddChild}
         onDeleteChild={onDeleteChild}
         onUpdateChild={onUpdateChild}
@@ -456,6 +485,23 @@ function BlockView(props: BlockViewProps) {
         onDeleteBranch={onDeleteBranch}
         onEdit={onEdit}
       />
+      {/* 版本标签（行右侧显示，颜色来自标签颜色注册表） */}
+      {block.versions && block.versions.length > 0 && (
+        <div className="absolute right-1 top-7 flex flex-col items-end gap-0.5 z-10 pointer-events-none">
+          {block.versions.map((t) => {
+            const color = tagColors[t] ?? '#8a8a8a'
+            return (
+              <span
+                key={t}
+                className="px-1 rounded text-[9px] font-mono leading-tight select-none"
+                style={{ background: color + '22', border: `1px solid ${color}55`, color }}
+              >
+                {t}
+              </span>
+            )
+          })}
+        </div>
+      )}
       {/* hover 操作按钮 */}
       <div className="absolute right-1 top-1 opacity-0 group-hover/block:opacity-100 flex gap-1">
         {props.onPlayFromLine && (
@@ -488,11 +534,14 @@ function BlockView(props: BlockViewProps) {
   )
 }
 
+// 顶层块视图：memo 化，编辑单个块/展开面板时跳过其余块的重渲染
+const MemoBlockView = memo(BlockView, memoEquals)
+
 // block 显示组件（只读）
 function BlockContent({
   block,
   charStates,
-  blockIndex,
+  path,
   onAddChild,
   onDeleteChild,
   onUpdateChild,
@@ -506,16 +555,16 @@ function BlockContent({
 }: {
   block: DialogueBlock
   charStates: Map<string, CharSpriteState>
-  blockIndex: number
+  path: number[]
   onAddChild: (path: number[], afterChildIdx: number, rect: DOMRect) => void
   onDeleteChild: (path: number[], childIdx: number) => void
   onUpdateChild: (path: number[], patch: Partial<DialogueBlock>) => void
   onEditChild: (path: number[]) => void
   onStopEditChild: () => void
   editingPath: number[] | null
-  onAddBranch: (branchType: 'elif' | 'else') => void
-  onUpdateBranchCondition: (branchIdx: number, condition: string) => void
-  onDeleteBranch: (branchIdx: number) => void
+  onAddBranch: (ifPath: number[], branchType: 'elif' | 'else') => void
+  onUpdateBranchCondition: (ifPath: number[], branchIdx: number, condition: string) => void
+  onDeleteBranch: (ifPath: number[], branchIdx: number) => void
   onEdit?: () => void
 }) {
   switch (block.type) {
@@ -529,10 +578,10 @@ function BlockContent({
       return <NarrationBlock block={block} />
     case 'menu':
       return (
-        <MenuBlock
+        <MemoMenuBlock
           block={block}
           charStates={charStates}
-          blockIndex={blockIndex}
+          path={path}
           onAddChild={onAddChild}
           onDeleteChild={onDeleteChild}
           onUpdateChild={onUpdateChild}
@@ -569,10 +618,10 @@ function BlockContent({
       return <HideBlock block={block} />
     case 'if':
       return (
-        <IfBlock
+        <MemoIfBlock
           block={block}
           charStates={charStates}
-          blockIndex={blockIndex}
+          path={path}
           onAddChild={onAddChild}
           onDeleteChild={onDeleteChild}
           onUpdateChild={onUpdateChild}
@@ -584,6 +633,19 @@ function BlockContent({
           onDeleteBranch={onDeleteBranch}
           onEdit={onEdit}
         />
+      )
+    case 'effect':
+      return (
+        <div className="flex items-center gap-2 py-1 px-4">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#b59a52" strokeWidth="2" width="12" height="12">
+            <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+          <span className="text-xs text-loom-muted">
+            <span className="text-loom-accent">{getTransitionLabel(block.transition) ?? `with ${block.transition}`}</span>
+          </span>
+          <span className="text-[10px] text-loom-muted/50 font-mono ml-auto">L{block.line}</span>
+        </div>
       )
     case 'comment':
       return (
@@ -603,6 +665,9 @@ function BlockContent({
       return null
   }
 }
+
+// block 内容：memo 化
+const MemoBlockContent = memo(BlockContent, memoEquals)
 
 // 可编辑 block
 interface EditableBlockProps {
@@ -714,6 +779,10 @@ function EditableBlock({ block, onUpdate, onDelete, onStopEdit }: EditableBlockP
               onChange={(v) => onUpdate({ voicePath: v })}
             />
           </div>
+          <VersionTagsEditor
+            value={block.versions ?? []}
+            onChange={(v) => onUpdate({ versions: v.length > 0 ? v : undefined })}
+          />
           <EditableActions onDelete={onDelete} onStopEdit={onStopEdit} />
         </div>
           <RichTextDialog
@@ -735,6 +804,10 @@ function EditableBlock({ block, onUpdate, onDelete, onStopEdit }: EditableBlockP
               onChange={(v) => onUpdate({ voicePath: v })}
             />
           </div>
+          <VersionTagsEditor
+            value={block.versions ?? []}
+            onChange={(v) => onUpdate({ versions: v.length > 0 ? v : undefined })}
+          />
           <EditableActions onDelete={onDelete} onStopEdit={onStopEdit} />
         </div>
       )
@@ -761,6 +834,10 @@ function EditableBlock({ block, onUpdate, onDelete, onStopEdit }: EditableBlockP
               MD/BB
             </button>
           </div>
+          <VersionTagsEditor
+            value={block.versions ?? []}
+            onChange={(v) => onUpdate({ versions: v.length > 0 ? v : undefined })}
+          />
           <EditableActions onDelete={onDelete} onStopEdit={onStopEdit} />
         </div>
           <RichTextDialog
@@ -785,6 +862,10 @@ function EditableBlock({ block, onUpdate, onDelete, onStopEdit }: EditableBlockP
               className="flex-1 bg-loom-panel border border-loom-border rounded px-2 py-1 text-sm font-mono text-loom-accent focus:outline-none focus:border-loom-accent"
             />
           </div>
+          <VersionTagsEditor
+            value={block.versions ?? []}
+            onChange={(v) => onUpdate({ versions: v.length > 0 ? v : undefined })}
+          />
           <EditableActions onDelete={onDelete} onStopEdit={onStopEdit} />
         </div>
       )
@@ -803,6 +884,10 @@ function EditableBlock({ block, onUpdate, onDelete, onStopEdit }: EditableBlockP
               className="flex-1 bg-loom-panel border border-loom-border rounded px-2 py-1 text-sm font-mono text-loom-text focus:outline-none focus:border-loom-accent"
             />
           </div>
+          <VersionTagsEditor
+            value={block.versions ?? []}
+            onChange={(v) => onUpdate({ versions: v.length > 0 ? v : undefined })}
+          />
           <EditableActions onDelete={onDelete} onStopEdit={onStopEdit} />
         </div>
       )
@@ -820,6 +905,35 @@ function EditableBlock({ block, onUpdate, onDelete, onStopEdit }: EditableBlockP
               className="flex-1 bg-loom-panel border border-loom-border rounded px-2 py-1 text-sm font-mono text-loom-text focus:outline-none focus:border-loom-accent"
             />
           </div>
+          <div className="flex items-center gap-2">
+            <label className="text-[10px] text-loom-muted w-12">特效</label>
+            <EffectPicker
+              value={block.transition}
+              onChange={(v) => onUpdate({ transition: v })}
+            />
+          </div>
+          <VersionTagsEditor
+            value={block.versions ?? []}
+            onChange={(v) => onUpdate({ versions: v.length > 0 ? v : undefined })}
+          />
+          <EditableActions onDelete={onDelete} onStopEdit={onStopEdit} />
+        </div>
+      )
+
+    case 'effect':
+      return (
+        <div className="p-3 rounded-lg bg-loom-bg border border-loom-accent/50 space-y-2">
+          <div className="flex items-center gap-2">
+            <label className="text-[10px] text-loom-muted w-12">特效</label>
+            <EffectPicker
+              value={block.transition}
+              onChange={(v) => onUpdate({ transition: v })}
+            />
+          </div>
+          <VersionTagsEditor
+            value={block.versions ?? []}
+            onChange={(v) => onUpdate({ versions: v.length > 0 ? v : undefined })}
+          />
           <EditableActions onDelete={onDelete} onStopEdit={onStopEdit} />
         </div>
       )
@@ -855,7 +969,18 @@ function EditableBlock({ block, onUpdate, onDelete, onStopEdit }: EditableBlockP
                 <span className="flex-shrink-0 text-[10px] text-loom-muted">选择…</span>
               </button>
             </div>
-            <EditableActions onDelete={onDelete} onStopEdit={onStopEdit} />
+            <div className="flex items-center gap-2">
+              <label className="text-[10px] text-loom-muted w-12">特效</label>
+              <EffectPicker
+                value={block.transition}
+                onChange={(v) => onUpdate({ transition: v })}
+              />
+            </div>
+            <VersionTagsEditor
+            value={block.versions ?? []}
+            onChange={(v) => onUpdate({ versions: v.length > 0 ? v : undefined })}
+          />
+          <EditableActions onDelete={onDelete} onStopEdit={onStopEdit} />
           </div>
           <ShowTargetDialog
             open={targetDialog.open}
@@ -915,6 +1040,10 @@ function EditableBlock({ block, onUpdate, onDelete, onStopEdit }: EditableBlockP
               className="flex-1 bg-loom-panel border border-loom-border rounded px-2 py-1 text-sm font-mono text-loom-text focus:outline-none focus:border-loom-accent"
             />
           </div>
+          <VersionTagsEditor
+            value={block.versions ?? []}
+            onChange={(v) => onUpdate({ versions: v.length > 0 ? v : undefined })}
+          />
           <EditableActions onDelete={onDelete} onStopEdit={onStopEdit} />
         </div>
       )
@@ -932,6 +1061,10 @@ function EditableBlock({ block, onUpdate, onDelete, onStopEdit }: EditableBlockP
               className="flex-1 bg-loom-panel border border-loom-border rounded px-2 py-1 text-sm font-mono text-loom-text focus:outline-none focus:border-loom-accent"
             />
           </div>
+          <VersionTagsEditor
+            value={block.versions ?? []}
+            onChange={(v) => onUpdate({ versions: v.length > 0 ? v : undefined })}
+          />
           <EditableActions onDelete={onDelete} onStopEdit={onStopEdit} />
         </div>
       )
@@ -949,6 +1082,10 @@ function EditableBlock({ block, onUpdate, onDelete, onStopEdit }: EditableBlockP
               className="flex-1 bg-loom-panel border border-loom-border rounded px-2 py-1 text-sm font-mono text-loom-text focus:outline-none focus:border-loom-accent"
             />
           </div>
+          <VersionTagsEditor
+            value={block.versions ?? []}
+            onChange={(v) => onUpdate({ versions: v.length > 0 ? v : undefined })}
+          />
           <EditableActions onDelete={onDelete} onStopEdit={onStopEdit} />
         </div>
       )
@@ -991,6 +1128,10 @@ function EditableBlock({ block, onUpdate, onDelete, onStopEdit }: EditableBlockP
               className="flex-1 bg-loom-panel border border-loom-border rounded px-2 py-1 text-sm font-mono text-loom-text focus:outline-none focus:border-loom-accent"
             />
           </div>
+          <VersionTagsEditor
+            value={block.versions ?? []}
+            onChange={(v) => onUpdate({ versions: v.length > 0 ? v : undefined })}
+          />
           <EditableActions onDelete={onDelete} onStopEdit={onStopEdit} />
         </div>
       )
@@ -1024,6 +1165,15 @@ function EditableBlock({ block, onUpdate, onDelete, onStopEdit }: EditableBlockP
                 placeholder="跳转目标"
                 className="w-28 bg-loom-panel border border-loom-border rounded px-2 py-1 text-xs font-mono text-loom-text focus:outline-none focus:border-loom-accent"
               />
+              <TagDropdown
+                compact
+                value={opt.versions ?? []}
+                onChange={(v) => {
+                  const newOptions = [...(block.options ?? [])]
+                  newOptions[i] = { ...opt, versions: v.length > 0 ? v : undefined }
+                  onUpdate({ options: newOptions })
+                }}
+              />
             </div>
           ))}
           <button
@@ -1035,6 +1185,10 @@ function EditableBlock({ block, onUpdate, onDelete, onStopEdit }: EditableBlockP
           >
             + 添加选项
           </button>
+          <VersionTagsEditor
+            value={block.versions ?? []}
+            onChange={(v) => onUpdate({ versions: v.length > 0 ? v : undefined })}
+          />
           <EditableActions onDelete={onDelete} onStopEdit={onStopEdit} />
         </div>
       )
@@ -1046,6 +1200,10 @@ function EditableBlock({ block, onUpdate, onDelete, onStopEdit }: EditableBlockP
           <div className="text-xs text-loom-muted">
             双击各分支头部编辑条件，底部按钮添加 elif/else
           </div>
+          <VersionTagsEditor
+            value={block.versions ?? []}
+            onChange={(v) => onUpdate({ versions: v.length > 0 ? v : undefined })}
+          />
           <EditableActions onDelete={onDelete} onStopEdit={onStopEdit} />
         </div>
       )
@@ -1054,10 +1212,31 @@ function EditableBlock({ block, onUpdate, onDelete, onStopEdit }: EditableBlockP
       return (
         <div className="p-3 rounded-lg bg-loom-bg border border-loom-accent/50 space-y-2">
           <div className="text-xs text-loom-muted">此类型暂不支持图形编辑</div>
+          <VersionTagsEditor
+            value={block.versions ?? []}
+            onChange={(v) => onUpdate({ versions: v.length > 0 ? v : undefined })}
+          />
           <EditableActions onDelete={onDelete} onStopEdit={onStopEdit} />
         </div>
       )
   }
+}
+
+// 版本标签编辑器：所有块类型通用的属性行（回车/逗号添加标签，点击 ✕ 移除）
+function VersionTagsEditor({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
+  return (
+    <div className="flex items-center gap-2">
+      <label
+        className="text-[10px] text-loom-muted w-12 flex-shrink-0"
+        title="版本标签：标记该剧情块属于哪些版本。未打标签的内容在所有版本中都会包含。"
+      >
+        版本标签
+      </label>
+      <div className="flex-1 min-w-0">
+        <TagDropdown value={value} onChange={onChange} placeholder="选择/新建" />
+      </div>
+    </div>
+  )
 }
 
 function EditableActions({ onDelete, onStopEdit }: { onDelete: () => void; onStopEdit: () => void }) {
@@ -1081,6 +1260,203 @@ function EditableActions({ onDelete, onStopEdit }: { onDelete: () => void; onSto
       >
         完成
       </button>
+    </div>
+  )
+}
+
+// 弹窗式特效选择器预设（官方内置转场 + CSS 动画预览）
+interface EffectPreset {
+  key: string
+  label: string
+  anim: string
+}
+const EFFECT_PRESETS: EffectPreset[] = [
+  { key: 'dissolve', label: '溶解淡入', anim: 'loom-prev-fade' },
+  { key: 'fade', label: '淡入淡出', anim: 'loom-prev-fadeblack' },
+  { key: 'pixellate', label: '马赛克切换', anim: 'loom-prev-pixel' },
+  { key: 'hpunch', label: '水平震动', anim: 'loom-prev-shake-x' },
+  { key: 'vpunch', label: '垂直震动', anim: 'loom-prev-shake-y' },
+  { key: 'wipeleft', label: '向左擦除', anim: 'loom-prev-wipe' },
+  { key: 'wiperight', label: '向右擦除', anim: 'loom-prev-wipe-r' },
+  { key: 'pushright', label: '向右推入', anim: 'loom-prev-slide-left' },
+  { key: 'pushleft', label: '向左推入', anim: 'loom-prev-slide-right' },
+  { key: 'irisin', label: '聚拢显现', anim: 'loom-prev-iris' },
+  { key: 'irisout', label: '扩散消失', anim: 'loom-prev-iris-out' },
+  { key: 'blinds', label: '百叶窗', anim: 'loom-prev-blinds' },
+  { key: 'squares', label: '方块切换', anim: 'loom-prev-squares' },
+  { key: 'moveinright', label: '右侧滑入', anim: 'loom-prev-slide-left' },
+  { key: 'zoomin', label: '放大显现', anim: 'loom-prev-zoom' },
+]
+
+// 特效选择器：弹窗 + 动画预览，覆盖场景/立绘/全局特效三类编辑
+function EffectPicker({
+  value,
+  onChange,
+}: {
+  value?: string
+  onChange: (v: string | undefined) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const label = getTransitionLabel(value) ?? value
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="flex-1 flex items-center gap-2 px-2 py-1.5 rounded bg-loom-panel border border-loom-border hover:border-loom-accent text-left transition-colors min-w-0"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" width="12" height="12" className="flex-shrink-0 text-loom-accent">
+          <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" />
+          <circle cx="12" cy="12" r="3" />
+        </svg>
+        <span className={`flex-1 truncate text-xs ${label ? 'text-loom-text' : 'text-loom-muted'}`}>
+          {label ?? '无特效'}
+        </span>
+        <span className="flex-shrink-0 text-[10px] text-loom-muted">选择…</span>
+      </button>
+      <EffectPickerDialog
+        open={open}
+        current={value}
+        onClose={() => setOpen(false)}
+        onApply={(v) => {
+          onChange(v)
+          setOpen(false)
+        }}
+      />
+    </>
+  )
+}
+
+// 特效选择弹窗：网格卡片（动画预览 + 中文名 + 表达式），支持自定义与清除
+function EffectPickerDialog({
+  open,
+  current,
+  onClose,
+  onApply,
+}: {
+  open: boolean
+  current?: string
+  onClose: () => void
+  onApply: (v: string | undefined) => void
+}) {
+  const [custom, setCustom] = useState(false)
+  const [customVal, setCustomVal] = useState(current ?? '')
+
+  useEffect(() => {
+    if (open) {
+      setCustom(false)
+      setCustomVal(current ?? '')
+    }
+  }, [open, current])
+
+  if (!open) return null
+
+  return (
+    <div className="fixed inset-0 z-[95] flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className="relative z-[96] w-[560px] max-h-[76vh] overflow-auto bg-loom-panel2 border border-loom-border rounded-lg shadow-2xl p-4 space-y-3">
+        <style>{`
+          @keyframes loom-prev-fade { 0%, 55% { opacity: 0 } 100% { opacity: 1 } }
+          @keyframes loom-prev-fadeblack { 0%, 100% { opacity: .9 } 45%, 55% { opacity: 0; background: #000 } }
+          @keyframes loom-prev-shake-x { 0%, 100% { transform: translateX(0) } 20%, 60% { transform: translateX(-16%) } 40%, 80% { transform: translateX(16%) } }
+          @keyframes loom-prev-shake-y { 0%, 100% { transform: translateY(0) } 20%, 60% { transform: translateY(-16%) } 40%, 80% { transform: translateY(16%) } }
+          @keyframes loom-prev-slide-left { 0% { transform: translateX(-100%) } 100% { transform: translateX(0) } }
+          @keyframes loom-prev-slide-right { 0% { transform: translateX(100%) } 100% { transform: translateX(0) } }
+          @keyframes loom-prev-zoom { 0% { transform: scale(.2); opacity: 0 } 100% { transform: scale(1); opacity: 1 } }
+          @keyframes loom-prev-wipe { 0% { clip-path: inset(0 100% 0 0) } 100% { clip-path: inset(0 0 0 0) } }
+          @keyframes loom-prev-wipe-r { 0% { clip-path: inset(0 0 0 100%) } 100% { clip-path: inset(0 0 0 0) } }
+          @keyframes loom-prev-iris { 0% { clip-path: circle(0% at 50% 50%) } 100% { clip-path: circle(65% at 50% 50%) } }
+          @keyframes loom-prev-iris-out { 0% { clip-path: circle(65% at 50% 50%) } 100% { clip-path: circle(0% at 50% 50%) } }
+          @keyframes loom-prev-pixel { 0%, 100% { opacity: 0 } 50% { opacity: .95 } }
+          @keyframes loom-prev-squares { 0%, 100% { opacity: 0 } 50% { opacity: .95 } }
+          @keyframes loom-prev-blinds { from { background-size: 100% 0% } to { background-size: 100% 100% } }
+          .loom-prev-fade { animation: loom-prev-fade 1.8s ease-in-out infinite }
+          .loom-prev-fadeblack { animation: loom-prev-fadeblack 2.2s ease-in-out infinite }
+          .loom-prev-shake-x { animation: loom-prev-shake-x .9s linear infinite }
+          .loom-prev-shake-y { animation: loom-prev-shake-y .9s linear infinite }
+          .loom-prev-slide-left { animation: loom-prev-slide-left 1.4s ease-in-out infinite }
+          .loom-prev-slide-right { animation: loom-prev-slide-right 1.4s ease-in-out infinite }
+          .loom-prev-zoom { animation: loom-prev-zoom 1.6s ease-in-out infinite }
+          .loom-prev-wipe { animation: loom-prev-wipe 1.6s ease-in-out infinite }
+          .loom-prev-wipe-r { animation: loom-prev-wipe-r 1.6s ease-in-out infinite }
+          .loom-prev-iris { animation: loom-prev-iris 1.6s ease-in-out infinite }
+          .loom-prev-iris-out { animation: loom-prev-iris-out 1.6s ease-in-out infinite }
+          .loom-prev-pixel { animation: loom-prev-pixel 1.4s steps(2, end) infinite }
+          .loom-prev-squares { animation: loom-prev-squares 1.4s steps(2, end) infinite }
+          .loom-prev-blinds { background: repeating-linear-gradient(to bottom, rgba(216,172,92,.85) 0 12.5%, rgba(240,234,214,0) 12.5% 25%); animation: loom-prev-blinds 1.8s ease-in-out infinite }
+        `}</style>
+        <div className="flex items-center justify-between">
+          <div className="text-sm font-semibold text-loom-text">选择特效</div>
+          <button onClick={onClose} className="text-loom-muted hover:text-loom-text text-sm leading-none px-1">✕</button>
+        </div>
+        <div className="grid grid-cols-4 gap-2">
+          {/* 无特效 */}
+          <button
+            type="button"
+            onClick={() => onApply(undefined)}
+            className={`rounded-lg border p-1.5 space-y-1 text-left transition-colors ${!current ? 'border-loom-accent bg-loom-accent/10' : 'border-loom-border hover:border-loom-accent/60'}`}
+          >
+            <div className="w-full h-14 rounded overflow-hidden bg-loom-panel flex items-center justify-center">
+              <svg viewBox="0 0 24 24" fill="none" stroke="#6b6358" strokeWidth="1.5" width="20" height="20">
+                <path d="M6 6l12 12M18 6L6 18" />
+              </svg>
+            </div>
+            <div className="text-[11px] text-loom-muted">无特效</div>
+          </button>
+          {EFFECT_PRESETS.map((p) => (
+            <button
+              type="button"
+              key={p.key}
+              onClick={() => onApply(p.key)}
+              className={`rounded-lg border p-1.5 space-y-1 text-left transition-colors ${current === p.key ? 'border-loom-accent bg-loom-accent/10' : 'border-loom-border hover:border-loom-accent/60'}`}
+            >
+              <div className="w-full h-14 rounded overflow-hidden relative bg-gradient-to-br from-loom-panel to-loom-accent/25">
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="w-8 h-8 rounded-full bg-loom-accent/40" />
+                </div>
+                <div className={`absolute inset-0 ${p.anim} bg-loom-accent/70`} />
+              </div>
+              <div className="text-[11px] text-loom-text truncate">{p.label}</div>
+              <div className="text-[9px] text-loom-muted font-mono truncate">with {p.key}</div>
+            </button>
+          ))}
+          {/* 自定义 */}
+          <button
+            type="button"
+            onClick={() => setCustom(true)}
+            className={`rounded-lg border p-1.5 space-y-1 text-left transition-colors ${custom ? 'border-loom-accent bg-loom-accent/10' : 'border-loom-border hover:border-loom-accent/60'}`}
+          >
+            {custom ? (
+              <div className="h-14 rounded overflow-hidden bg-loom-panel flex items-center justify-center px-1">
+                <input
+                  autoFocus
+                  type="text"
+                  value={customVal}
+                  onChange={(e) => setCustomVal(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && customVal.trim()) onApply(customVal.trim())
+                    if (e.key === 'Escape') setCustom(false)
+                  }}
+                  onBlur={() => {
+                    if (customVal.trim()) onApply(customVal.trim())
+                    else setCustom(false)
+                  }}
+                  placeholder="Dissolve(1.0)"
+                  className="w-full bg-loom-bg border border-loom-border rounded px-1.5 py-1 text-[10px] font-mono text-loom-text focus:outline-none focus:border-loom-accent"
+                />
+              </div>
+            ) : (
+              <div className="w-full h-14 rounded overflow-hidden bg-loom-panel flex items-center justify-center">
+                <svg viewBox="0 0 24 24" fill="none" stroke="#6b6358" strokeWidth="1.8" width="20" height="20">
+                  <path d="M12 20h9M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4L16.5 3.5z" />
+                </svg>
+              </div>
+            )}
+            <div className="text-[11px] text-loom-text truncate">{custom ? '自定义…' : '自定义'}</div>
+            <div className="text-[9px] text-loom-muted font-mono truncate">{custom && customVal ? `with ${customVal}` : '任意表达式'}</div>
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -1291,7 +1667,7 @@ function VoiceBlock({ block }: { block: DialogueBlock }) {
 function MenuBlock({
   block,
   charStates,
-  blockIndex,
+  path,
   onAddChild,
   onDeleteChild,
   onUpdateChild,
@@ -1305,16 +1681,16 @@ function MenuBlock({
 }: {
   block: DialogueBlock
   charStates: Map<string, CharSpriteState>
-  blockIndex: number
+  path: number[]
   onAddChild: (path: number[], afterChildIdx: number, rect: DOMRect) => void
   onDeleteChild: (path: number[], childIdx: number) => void
   onUpdateChild: (path: number[], patch: Partial<DialogueBlock>) => void
   onEditChild: (path: number[]) => void
   onStopEditChild: () => void
   editingPath: number[] | null
-  onAddBranch: (branchType: 'elif' | 'else') => void
-  onUpdateBranchCondition: (branchIdx: number, condition: string) => void
-  onDeleteBranch: (branchIdx: number) => void
+  onAddBranch: (ifPath: number[], branchType: 'elif' | 'else') => void
+  onUpdateBranchCondition: (ifPath: number[], branchIdx: number, condition: string) => void
+  onDeleteBranch: (ifPath: number[], branchIdx: number) => void
   onEdit?: () => void
 }) {
   return (
@@ -1332,11 +1708,11 @@ function MenuBlock({
       </div>
       <div className="space-y-1">
         {block.options?.map((opt, i) => (
-          <MenuOptionItem
+          <MemoMenuOptionItem
             key={i}
             opt={opt}
             optIndex={i}
-            blockIndex={blockIndex}
+            path={path}
             charStates={charStates}
             onAddChild={onAddChild}
             onDeleteChild={onDeleteChild}
@@ -1354,10 +1730,13 @@ function MenuBlock({
   )
 }
 
+// 选项块（menu）：memo 化
+const MemoMenuBlock = memo(MenuBlock, memoEquals)
+
 function MenuOptionItem({
   opt,
   optIndex,
-  blockIndex,
+  path,
   charStates,
   onAddChild,
   onDeleteChild,
@@ -1369,9 +1748,9 @@ function MenuOptionItem({
   onUpdateBranchCondition,
   onDeleteBranch,
 }: {
-  opt: { text: string; target: string | null; line: number; children?: DialogueBlock[] }
+  opt: { text: string; target: string | null; line: number; children?: DialogueBlock[]; versions?: string[] }
   optIndex: number
-  blockIndex: number
+  path: number[]
   charStates: Map<string, CharSpriteState>
   onAddChild: (path: number[], afterChildIdx: number, rect: DOMRect) => void
   onDeleteChild: (path: number[], childIdx: number) => void
@@ -1379,20 +1758,21 @@ function MenuOptionItem({
   onEditChild: (path: number[]) => void
   onStopEditChild: () => void
   editingPath: number[] | null
-  onAddBranch: (branchType: 'elif' | 'else') => void
-  onUpdateBranchCondition: (branchIdx: number, condition: string) => void
-  onDeleteBranch: (branchIdx: number) => void
+  onAddBranch: (ifPath: number[], branchType: 'elif' | 'else') => void
+  onUpdateBranchCondition: (ifPath: number[], branchIdx: number, condition: string) => void
+  onDeleteBranch: (ifPath: number[], branchIdx: number) => void
 }) {
   const [isEditing, setIsEditing] = useState(false)
   const [textDraft, setTextDraft] = useState(opt.text)
   const [targetDraft, setTargetDraft] = useState(opt.target ?? '')
+  const tagColors = useVersionSchemes((s) => s.tagColors)
+  // 本选项的完整路径 = menu 路径 + optIndex；选项 children 的增删改都用它定位
+  const optPath = [...path, optIndex]
 
   const handleSave = () => {
-    onUpdateChild([blockIndex, optIndex], { text: textDraft, target: targetDraft || null } as any)
+    onUpdateChild(optPath, { text: textDraft, target: targetDraft || null } as any)
     setIsEditing(false)
   }
-
-  const path = [blockIndex, optIndex]
 
   if (isEditing) {
     return (
@@ -1447,6 +1827,22 @@ function MenuOptionItem({
             → {opt.target}
           </span>
         )}
+        {opt.versions && opt.versions.length > 0 && (
+          <span className="flex items-center gap-1">
+            {opt.versions.map((t) => {
+              const color = tagColors[t] ?? '#8a8a8a'
+              return (
+                <span
+                  key={t}
+                  className="px-1 rounded text-[9px] font-mono leading-tight select-none"
+                  style={{ background: color + '22', border: `1px solid ${color}55`, color }}
+                >
+                  {t}
+                </span>
+              )
+            })}
+          </span>
+        )}
         <button
           onClick={() => setIsEditing(true)}
           className="opacity-0 group-hover/opt:opacity-100 w-4 h-4 flex items-center justify-center rounded bg-loom-panel2 border border-loom-border text-loom-muted hover:text-loom-accent text-[10px]"
@@ -1462,13 +1858,13 @@ function MenuOptionItem({
               {/* 子内容之前的添加按钮 */}
               <div className="group/childgap relative">
                 <ChildAddButton
-                  onClick={(rect) => onAddChild(path, ci - 1, rect)}
+                  onClick={(rect) => onAddChild(optPath, ci - 1, rect)}
                 />
               </div>
-              <ChildBlockView
+              <MemoChildBlockView
                 block={child}
                 charStates={charStates}
-                path={[...path, ci]}
+                path={[...optPath, ci]}
                 onAddChild={onAddChild}
                 onDeleteChild={onDeleteChild}
                 onUpdateChild={onUpdateChild}
@@ -1484,20 +1880,23 @@ function MenuOptionItem({
           {/* 末尾添加按钮 */}
           <div className="group/childgap relative">
             <ChildAddButton
-              onClick={(rect) => onAddChild(path, (opt.children?.length ?? 1) - 1, rect)}
+              onClick={(rect) => onAddChild(optPath, (opt.children?.length ?? 1) - 1, rect)}
             />
           </div>
         </div>
       ) : (
         <div className="border-t border-loom-border/50 px-3 py-1.5 ml-4">
           <ChildAddButton
-            onClick={(rect) => onAddChild(path, -1, rect)}
+            onClick={(rect) => onAddChild(optPath, -1, rect)}
           />
         </div>
       )}
     </div>
   )
 }
+
+// 菜单选项项：memo 化
+const MemoMenuOptionItem = memo(MenuOptionItem, memoEquals)
 
 function JumpBlock({ block }: { block: DialogueBlock }) {
   return (
@@ -1668,6 +2067,9 @@ function SceneBlock({ block }: { block: DialogueBlock }) {
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-[#6b6358]">背景</span>
           <span className="text-[10px] text-loom-muted/50 font-mono">L{block.line}</span>
+          {block.transition && (
+            <span className="text-[10px] font-mono text-loom-accent/90 bg-loom-accent/10 rounded px-1">{getTransitionLabel(block.transition) ?? `with ${block.transition}`}</span>
+          )}
         </div>
         <div className="text-sm text-loom-text font-mono truncate">
           {bg}
@@ -1738,8 +2140,10 @@ function useGalleryCgList(): GalleryCgEntry[] {
 }
 
 // 画廊 CG 图片名列表（只取名称，供 classifyShowBlocks 分类）
+// useMemo 稳定引用：避免每次渲染产生新数组，导致 blocks useMemo 反复重解析整个脚本
 function useGalleryCgNames(): string[] {
-  return useGalleryCgList().map((c) => c.name)
+  const list = useGalleryCgList()
+  return useMemo(() => list.map((c) => c.name), [list])
 }
 
 // 其他图片列表：递归扫描 game/images/ 目录
@@ -2081,6 +2485,9 @@ function ShowBlock({ block }: { block: DialogueBlock }) {
           <div className="flex items-center gap-2">
             <span className="text-xs font-semibold text-loom-accent">展示CG</span>
             <span className="text-[10px] text-loom-muted/50 font-mono">L{block.line}</span>
+            {block.transition && (
+              <span className="text-[10px] font-mono text-loom-accent/90 bg-loom-accent/10 rounded px-1">{getTransitionLabel(block.transition) ?? `with ${block.transition}`}</span>
+            )}
           </div>
           <div className="text-sm text-loom-text font-mono truncate">{name}</div>
         </div>
@@ -2102,6 +2509,9 @@ function ShowBlock({ block }: { block: DialogueBlock }) {
           <div className="flex items-center gap-2">
             <span className="text-xs font-semibold text-loom-accent">展示图片</span>
             <span className="text-[10px] text-loom-muted/50 font-mono">L{block.line}</span>
+            {block.transition && (
+              <span className="text-[10px] font-mono text-loom-accent/90 bg-loom-accent/10 rounded px-1">{getTransitionLabel(block.transition) ?? `with ${block.transition}`}</span>
+            )}
           </div>
           <div className="text-sm text-loom-text font-mono truncate">{name}</div>
         </div>
@@ -2120,6 +2530,9 @@ function ShowBlock({ block }: { block: DialogueBlock }) {
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-loom-accent">展示立绘</span>
           <span className="text-[10px] text-loom-muted/50 font-mono">L{block.line}</span>
+          {block.transition && (
+            <span className="text-[10px] font-mono text-loom-accent/90 bg-loom-accent/10 rounded px-1">{getTransitionLabel(block.transition) ?? `with ${block.transition}`}</span>
+          )}
         </div>
         <div className="text-sm text-loom-text truncate">
           <span style={{ color: character?.color ?? '#f0ead6' }}>
@@ -2157,6 +2570,9 @@ function HideBlock({ block }: { block: DialogueBlock }) {
           <div className="flex items-center gap-2">
             <span className="text-xs font-semibold text-loom-muted">隐藏CG</span>
             <span className="text-[10px] text-loom-muted/50 font-mono">L{block.line}</span>
+            {block.transition && (
+              <span className="text-[10px] font-mono text-loom-accent/90 bg-loom-accent/10 rounded px-1">{getTransitionLabel(block.transition) ?? `with ${block.transition}`}</span>
+            )}
           </div>
           <div className="text-sm text-loom-muted font-mono truncate">{name}</div>
         </div>
@@ -2178,6 +2594,9 @@ function HideBlock({ block }: { block: DialogueBlock }) {
           <div className="flex items-center gap-2">
             <span className="text-xs font-semibold text-loom-muted">隐藏图片</span>
             <span className="text-[10px] text-loom-muted/50 font-mono">L{block.line}</span>
+            {block.transition && (
+              <span className="text-[10px] font-mono text-loom-accent/90 bg-loom-accent/10 rounded px-1">{getTransitionLabel(block.transition) ?? `with ${block.transition}`}</span>
+            )}
           </div>
           <div className="text-sm text-loom-muted font-mono truncate">{name}</div>
         </div>
@@ -2196,6 +2615,9 @@ function HideBlock({ block }: { block: DialogueBlock }) {
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-loom-muted">隐藏立绘</span>
           <span className="text-[10px] text-loom-muted/50 font-mono">L{block.line}</span>
+          {block.transition && (
+            <span className="text-[10px] font-mono text-loom-accent/90 bg-loom-accent/10 rounded px-1">{getTransitionLabel(block.transition) ?? `with ${block.transition}`}</span>
+          )}
         </div>
         <div className="text-sm text-loom-muted truncate">
           <span>{character?.name ?? block.showCharVar}</span>
@@ -2232,9 +2654,9 @@ function ChildBlockView({
   onEditChild: (path: number[]) => void
   editingPath: number[] | null
   onStopEdit: () => void
-  onAddBranch?: (branchType: 'elif' | 'else') => void
-  onUpdateBranchCondition?: (branchIdx: number, condition: string) => void
-  onDeleteBranch?: (branchIdx: number) => void
+  onAddBranch?: (ifPath: number[], branchType: 'elif' | 'else') => void
+  onUpdateBranchCondition?: (ifPath: number[], branchIdx: number, condition: string) => void
+  onDeleteBranch?: (ifPath: number[], branchIdx: number) => void
 }) {
   const isEditing = editingPath && arraysEqual(editingPath, path)
   const containerPath = path.slice(0, -1)
@@ -2262,19 +2684,19 @@ function ChildBlockView({
         onDoubleClick={() => onEditChild(path)}
         title="双击编辑"
       >
-        <BlockContent
+        <MemoBlockContent
           block={block}
           charStates={charStates}
-          blockIndex={path[0]}
+          path={path}
           onAddChild={onAddChild}
           onDeleteChild={onDeleteChild}
           onUpdateChild={onUpdateChild}
           onEditChild={onEditChild}
           onStopEditChild={onStopEdit}
           editingPath={editingPath}
-          onAddBranch={onAddBranch ?? (() => {})}
-          onUpdateBranchCondition={onUpdateBranchCondition ?? (() => {})}
-          onDeleteBranch={onDeleteBranch ?? (() => {})}
+          onAddBranch={onAddBranch ?? NOOP_BRANCH}
+          onUpdateBranchCondition={onUpdateBranchCondition ?? NOOP_BRANCH}
+          onDeleteBranch={onDeleteBranch ?? NOOP_BRANCH}
         />
       </div>
       {/* hover 操作按钮 */}
@@ -2298,11 +2720,14 @@ function ChildBlockView({
   )
 }
 
+// 子块视图：memo 化
+const MemoChildBlockView = memo(ChildBlockView, memoEquals)
+
 // If/Elif/Else block 显示组件（合并为一个 block）
 function IfBlock({
   block,
   charStates,
-  blockIndex,
+  path,
   onAddChild,
   onDeleteChild,
   onUpdateChild,
@@ -2316,16 +2741,16 @@ function IfBlock({
 }: {
   block: DialogueBlock
   charStates: Map<string, CharSpriteState>
-  blockIndex: number
+  path: number[]
   onAddChild: (path: number[], afterChildIdx: number, rect: DOMRect) => void
   onDeleteChild: (path: number[], childIdx: number) => void
   onUpdateChild: (path: number[], patch: Partial<DialogueBlock>) => void
   onEditChild: (path: number[]) => void
   onStopEditChild: () => void
   editingPath: number[] | null
-  onAddBranch: (branchType: 'elif' | 'else') => void
-  onUpdateBranchCondition: (branchIdx: number, condition: string) => void
-  onDeleteBranch: (branchIdx: number) => void
+  onAddBranch: (ifPath: number[], branchType: 'elif' | 'else') => void
+  onUpdateBranchCondition: (ifPath: number[], branchIdx: number, condition: string) => void
+  onDeleteBranch: (ifPath: number[], branchIdx: number) => void
   onEdit?: () => void
 }) {
   const branches = block.branches ?? []
@@ -2345,11 +2770,11 @@ function IfBlock({
         <span className="text-[10px] text-loom-muted/50 font-mono">L{block.line}</span>
       </div>
       {branches.map((branch, branchIdx) => (
-        <BranchView
+        <MemoBranchView
           key={branchIdx}
           branch={branch}
           branchIdx={branchIdx}
-          blockIndex={blockIndex}
+          ifPath={path}
           charStates={charStates}
           onAddChild={onAddChild}
           onDeleteChild={onDeleteChild}
@@ -2366,13 +2791,13 @@ function IfBlock({
       {/* 底部按钮：添加 elif/else */}
       <div className="flex items-center gap-2 px-4 py-2 border-t border-loom-border bg-loom-bg/20">
         <button
-          onClick={() => onAddBranch('elif')}
+          onClick={() => onAddBranch(path, 'elif')}
           className="px-2 py-1 text-[11px] rounded bg-loom-panel2 border border-loom-border text-loom-muted hover:text-loom-accent hover:border-loom-accent transition-colors"
         >
           + 否则如果
         </button>
         <button
-          onClick={() => onAddBranch('else')}
+          onClick={() => onAddBranch(path, 'else')}
           className="px-2 py-1 text-[11px] rounded bg-loom-panel2 border border-loom-border text-loom-muted hover:text-loom-accent hover:border-loom-accent transition-colors"
         >
           + 否则
@@ -2382,10 +2807,13 @@ function IfBlock({
   )
 }
 
+// 条件分支块：memo 化
+const MemoIfBlock = memo(IfBlock, memoEquals)
+
 function BranchView({
   branch,
   branchIdx,
-  blockIndex,
+  ifPath,
   charStates,
   onAddChild,
   onDeleteChild,
@@ -2400,7 +2828,7 @@ function BranchView({
 }: {
   branch: IfBranch
   branchIdx: number
-  blockIndex: number
+  ifPath: number[]
   charStates: Map<string, CharSpriteState>
   onAddChild: (path: number[], afterChildIdx: number, rect: DOMRect) => void
   onDeleteChild: (path: number[], childIdx: number) => void
@@ -2408,9 +2836,9 @@ function BranchView({
   onEditChild: (path: number[]) => void
   onStopEdit: () => void
   editingPath: number[] | null
-  onAddBranch: (branchType: 'elif' | 'else') => void
-  onUpdateBranchCondition: (branchIdx: number, condition: string) => void
-  onDeleteBranch: (branchIdx: number) => void
+  onAddBranch: (ifPath: number[], branchType: 'elif' | 'else') => void
+  onUpdateBranchCondition: (ifPath: number[], branchIdx: number, condition: string) => void
+  onDeleteBranch: (ifPath: number[], branchIdx: number) => void
   isLast: boolean
 }) {
   const [isEditing, setIsEditing] = useState(false)
@@ -2449,14 +2877,14 @@ function BranchView({
 
   const handleSave = () => {
     if (branch.type !== 'else') {
-      onUpdateBranchCondition(branchIdx, conditionDraft)
+      onUpdateBranchCondition(ifPath, branchIdx, conditionDraft)
     }
     setIsEditing(false)
   }
 
   const borderColor = branch.type === 'if' ? '#6B9BD1' : branch.type === 'elif' ? '#9B9B6B' : '#8B8B8B'
   const labelText = branch.type === 'if' ? '如果' : branch.type === 'elif' ? '否则如果' : '否则'
-  const path = [blockIndex, branchIdx]
+  const path = [...ifPath, branchIdx]
 
   return (
     <div className="group/branch">
@@ -2543,7 +2971,7 @@ function BranchView({
           <button
             onClick={(e) => {
               e.stopPropagation()
-              onDeleteBranch(branchIdx)
+              onDeleteBranch(ifPath, branchIdx)
             }}
             className="opacity-0 group-hover/branch:opacity-100 w-4 h-4 flex items-center justify-center rounded bg-loom-panel2 border border-loom-border text-loom-muted hover:text-loom-err text-[10px]"
             title="删除分支"
@@ -2563,7 +2991,7 @@ function BranchView({
                   onClick={(rect) => onAddChild(path, childIdx - 1, rect)}
                 />
               </div>
-              <ChildBlockView
+              <MemoChildBlockView
                 block={child}
                 charStates={charStates}
                 path={[...path, childIdx]}
@@ -2592,6 +3020,9 @@ function BranchView({
     </div>
   )
 }
+
+// 分支视图：memo 化
+const MemoBranchView = memo(BranchView, memoEquals)
 
 // 子内容添加按钮（与顶层 AddButton 保持一致）
 function ChildAddButton({ onClick }: { onClick: (rect: DOMRect) => void }) {

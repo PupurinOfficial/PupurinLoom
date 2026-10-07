@@ -9,7 +9,7 @@ export function serializeBlocks(blocks: DialogueBlock[]): string {
     switch (block.type) {
       case 'label': {
         // label 声明：顶格（无缩进）
-        lines.push(`label ${block.labelName}:`)
+        lines.push(`label ${block.labelName}:${loomSuffix(block)}`)
         break
       }
 
@@ -20,27 +20,27 @@ export function serializeBlocks(blocks: DialogueBlock[]): string {
         if (block.voicePath) {
           lines.push(`${indent}voice ${quoteWrap(block.voicePath)}`)
         }
-        lines.push(`${indent}${block.charVar}${spritePart} ${quoteWrap(block.text ?? '')}`)
+        lines.push(`${indent}${block.charVar}${spritePart} ${quoteWrap(block.text ?? '')}${block.id ? ` ${block.id}` : ''}${loomSuffix(block)}`)
         break
       }
 
       case 'voice': {
         const indent = extractIndent(block.raw)
-        lines.push(`${indent}voice ${quoteWrap(block.voicePath ?? '')}`)
+        lines.push(`${indent}voice ${quoteWrap(block.voicePath ?? '')}${loomSuffix(block)}`)
         break
       }
 
       case 'narration': {
         // 从 raw 中提取原始缩进
         const indent = extractIndent(block.raw)
-        lines.push(`${indent}${quoteWrap(block.text ?? '')}`)
+        lines.push(`${indent}${quoteWrap(block.text ?? '')}${block.id ? ` ${block.id}` : ''}${loomSuffix(block)}`)
         break
       }
 
       case 'menu': {
         // 从 raw 中提取原始缩进
         const indent = extractIndent(block.raw)
-        lines.push(`${indent}menu:`)
+        lines.push(`${indent}menu:${loomSuffix(block)}`)
         if (block.options) {
           const optIndent = indent + '    '
           for (const opt of block.options) {
@@ -48,6 +48,7 @@ export function serializeBlocks(blocks: DialogueBlock[]): string {
             if (opt.target) {
               line += ` jump ${opt.target}`
             }
+            line += loomSuffix({ versions: opt.versions })
             lines.push(line)
             // 序列化选项的 children
             if (opt.children && opt.children.length > 0) {
@@ -66,19 +67,19 @@ export function serializeBlocks(blocks: DialogueBlock[]): string {
 
       case 'jump': {
         const indent = extractIndent(block.raw)
-        lines.push(`${indent}jump ${block.target}`)
+        lines.push(`${indent}jump ${block.target}${loomSuffix(block)}`)
         break
       }
 
       case 'call': {
         const indent = extractIndent(block.raw)
-        lines.push(`${indent}call ${block.target}`)
+        lines.push(`${indent}call ${block.target}${loomSuffix(block)}`)
         break
       }
 
       case 'return': {
         const indent = extractIndent(block.raw)
-        lines.push(`${indent}return`)
+        lines.push(`${indent}return${loomSuffix(block)}`)
         break
       }
 
@@ -86,25 +87,32 @@ export function serializeBlocks(blocks: DialogueBlock[]): string {
         const indent = extractIndent(block.raw)
         const slot = quoteWrap(block.saveSlot ?? '')
         const desc = block.saveDescription ? `, ${quoteWrap(block.saveDescription)}` : ''
-        lines.push(`${indent}$ renpy.save(${slot}${desc})`)
+        lines.push(`${indent}$ renpy.save(${slot}${desc})${loomSuffix(block)}`)
         break
       }
 
       case 'movie_cutscene': {
         const indent = extractIndent(block.raw)
-        lines.push(`${indent}$ renpy.movie_cutscene(${quoteWrap(block.videoPath ?? '')})`)
+        lines.push(`${indent}$ renpy.movie_cutscene(${quoteWrap(block.videoPath ?? '')})${loomSuffix(block)}`)
         break
       }
 
       case 'open_url': {
         const indent = extractIndent(block.raw)
-        lines.push(`${indent}$ renpy.open_url(${quoteWrap(block.urlPath ?? '')})`)
+        lines.push(`${indent}$ renpy.open_url(${quoteWrap(block.urlPath ?? '')})${loomSuffix(block)}`)
         break
       }
 
       case 'scene': {
         const indent = extractIndent(block.raw)
-        lines.push(`${indent}scene ${block.background}`)
+        const withPart = block.transition ? ` with ${block.transition}` : ''
+        lines.push(`${indent}scene ${block.background}${withPart}${loomSuffix(block)}`)
+        break
+      }
+
+      case 'effect': {
+        const indent = extractIndent(block.raw)
+        lines.push(`${indent}with ${block.transition}${loomSuffix(block)}`)
         break
       }
 
@@ -115,9 +123,10 @@ export function serializeBlocks(blocks: DialogueBlock[]): string {
             ? block.showImage
             : [block.showCharVar, block.showSprite].filter(Boolean).join(' ')
         if (target.trim()) {
-          // other 不写 # loom: 标记（按 images/ 图片自动命名确定性分类）
-          const mark = block.showExplicit && block.showKind && block.showKind !== 'other' ? `  # loom:${block.showKind}` : ''
-          lines.push(`${indent}show ${target}${mark}`)
+          // other 不写类型标记（按 images/ 图片自动命名确定性分类），版本标签正常写出
+          const mark = loomSuffix(block)
+          const withPart = block.transition ? ` with ${block.transition}` : ''
+          lines.push(`${indent}show ${target}${withPart}${mark}`)
         } else {
           lines.push(block.raw)
         }
@@ -131,9 +140,10 @@ export function serializeBlocks(blocks: DialogueBlock[]): string {
             ? block.showImage
             : [block.showCharVar, block.showSprite].filter(Boolean).join(' ')
         if (target.trim()) {
-          // other 不写 # loom: 标记（按 images/ 图片自动命名确定性分类）
-          const mark = block.showExplicit && block.showKind && block.showKind !== 'other' ? `  # loom:${block.showKind}` : ''
-          lines.push(`${indent}hide ${target}${mark}`)
+          // other 不写类型标记（按 images/ 图片自动命名确定性分类），版本标签正常写出
+          const mark = loomSuffix(block)
+          const withPart = block.transition ? ` with ${block.transition}` : ''
+          lines.push(`${indent}hide ${target}${withPart}${mark}`)
         } else {
           lines.push(block.raw)
         }
@@ -141,14 +151,14 @@ export function serializeBlocks(blocks: DialogueBlock[]): string {
       }
 
       case 'default': {
-        lines.push(`default ${block.varName} = ${block.varValue}`)
+        lines.push(`default ${block.varName} = ${block.varValue}${loomSuffix(block)}`)
         break
       }
 
       case 'modify_var': {
         const indent = extractIndent(block.raw)
         const op = block.modifyOp === 'add' ? '+=' : block.modifyOp === 'subtract' ? '-=' : '='
-        lines.push(`${indent}$ ${block.varName} ${op} ${block.modifyValue}`)
+        lines.push(`${indent}$ ${block.varName} ${op} ${block.modifyValue}${loomSuffix(block)}`)
         break
       }
 
@@ -157,7 +167,7 @@ export function serializeBlocks(blocks: DialogueBlock[]): string {
         if (block.branches) {
           for (const branch of block.branches) {
             if (branch.type === 'if') {
-              lines.push(`${indent}if ${branch.condition ?? ''}:`)
+              lines.push(`${indent}if ${branch.condition ?? ''}:${loomSuffix(block)}`)
             } else if (branch.type === 'elif') {
               lines.push(`${indent}elif ${branch.condition ?? ''}:`)
             } else {
@@ -204,54 +214,80 @@ function extractIndent(raw: string): string {
   return match && match[1] ? match[1] : '    '
 }
 
+// 生成行内 `# loom:` 注释后缀（类型标记 + 版本标签合并为一条注释）：
+//   show/hide 且有显式类型 → `# loom:sprite versions: r18,watch`
+//   仅版本标签 → `# loom: versions: r18,watch`
+//   都没有 → 空字符串
+function loomSuffix(block: { showKind?: 'sprite' | 'cg' | 'other'; showExplicit?: boolean; versions?: string[] }): string {
+  const parts: string[] = []
+  if (block.showExplicit && block.showKind && block.showKind !== 'other') {
+    parts.push(block.showKind)
+  }
+  if (block.versions && block.versions.length > 0) {
+    parts.push(`versions: ${block.versions.join(',')}`)
+  }
+  if (parts.length === 0) return ''
+  const joined = parts.join(' ')
+  // 类型标记紧跟 loom:（# loom:sprite）；仅版本标签时在 loom: 后加空格保持可读
+  const sep = parts[0] === block.showKind ? '' : ' '
+  return `  # loom:${sep}${joined}`
+}
+
 // 以指定缩进序列化 blocks（用于子内容）
 function serializeBlocksWithIndent(blocks: DialogueBlock[], baseIndent: string): string[] {
   const lines: string[] = []
   for (const block of blocks) {
     const indent = extractIndent(block.raw)
-    // 如果 raw 为空或没有缩进，使用基础缩进
-    const actualIndent = (indent === '    ' && block.raw === '') ? baseIndent : indent
+    // 新建块（raw 为空或没有前导空格，如 show/hide 模板 "show char normal"）使用容器基准缩进；
+    // 已从源码解析的块保留其原始缩进
+    const leadingWs = /^\s*/.exec(block.raw)?.[0] ?? ''
+    const actualIndent = leadingWs ? indent : baseIndent
     switch (block.type) {
       case 'dialogue': {
         const spritePart = block.sprite ? ` ${block.sprite}` : ''
         if (block.voicePath) {
           lines.push(`${actualIndent}voice ${quoteWrap(block.voicePath)}`)
         }
-        lines.push(`${actualIndent}${block.charVar}${spritePart} ${quoteWrap(block.text ?? '')}`)
+        lines.push(`${actualIndent}${block.charVar}${spritePart} ${quoteWrap(block.text ?? '')}${block.id ? ` ${block.id}` : ''}${loomSuffix(block)}`)
         break
       }
       case 'voice': {
-        lines.push(`${actualIndent}voice ${quoteWrap(block.voicePath ?? '')}`)
+        lines.push(`${actualIndent}voice ${quoteWrap(block.voicePath ?? '')}${loomSuffix(block)}`)
         break
       }
       case 'narration': {
-        lines.push(`${actualIndent}${quoteWrap(block.text ?? '')}`)
+        lines.push(`${actualIndent}${quoteWrap(block.text ?? '')}${block.id ? ` ${block.id}` : ''}${loomSuffix(block)}`)
         break
       }
       case 'jump': {
-        lines.push(`${actualIndent}jump ${block.target}`)
+        lines.push(`${actualIndent}jump ${block.target}${loomSuffix(block)}`)
         break
       }
       case 'call': {
-        lines.push(`${actualIndent}call ${block.target}`)
+        lines.push(`${actualIndent}call ${block.target}${loomSuffix(block)}`)
         break
       }
       case 'save': {
         const slot = quoteWrap(block.saveSlot ?? '')
         const desc = block.saveDescription ? `, ${quoteWrap(block.saveDescription)}` : ''
-        lines.push(`${actualIndent}$ renpy.save(${slot}${desc})`)
+        lines.push(`${actualIndent}$ renpy.save(${slot}${desc})${loomSuffix(block)}`)
         break
       }
       case 'movie_cutscene': {
-        lines.push(`${actualIndent}$ renpy.movie_cutscene(${quoteWrap(block.videoPath ?? '')})`)
+        lines.push(`${actualIndent}$ renpy.movie_cutscene(${quoteWrap(block.videoPath ?? '')})${loomSuffix(block)}`)
         break
       }
       case 'open_url': {
-        lines.push(`${actualIndent}$ renpy.open_url(${quoteWrap(block.urlPath ?? '')})`)
+        lines.push(`${actualIndent}$ renpy.open_url(${quoteWrap(block.urlPath ?? '')})${loomSuffix(block)}`)
         break
       }
       case 'scene': {
-        lines.push(`${actualIndent}scene ${block.background}`)
+        const withPart = block.transition ? ` with ${block.transition}` : ''
+        lines.push(`${actualIndent}scene ${block.background}${withPart}${loomSuffix(block)}`)
+        break
+      }
+      case 'effect': {
+        lines.push(`${actualIndent}with ${block.transition}${loomSuffix(block)}`)
         break
       }
       case 'show': {
@@ -260,9 +296,10 @@ function serializeBlocksWithIndent(blocks: DialogueBlock[], baseIndent: string):
             ? block.showImage
             : [block.showCharVar, block.showSprite].filter(Boolean).join(' ')
         if (target.trim()) {
-          // other 不写 # loom: 标记（按 images/ 图片自动命名确定性分类）
-          const mark = block.showExplicit && block.showKind && block.showKind !== 'other' ? `  # loom:${block.showKind}` : ''
-          lines.push(`${actualIndent}show ${target}${mark}`)
+          // other 不写类型标记（按 images/ 图片自动命名确定性分类），版本标签正常写出
+          const mark = loomSuffix(block)
+          const withPart = block.transition ? ` with ${block.transition}` : ''
+          lines.push(`${actualIndent}show ${target}${withPart}${mark}`)
         } else {
           lines.push(block.raw)
         }
@@ -274,28 +311,29 @@ function serializeBlocksWithIndent(blocks: DialogueBlock[], baseIndent: string):
             ? block.showImage
             : [block.showCharVar, block.showSprite].filter(Boolean).join(' ')
         if (target.trim()) {
-          // other 不写 # loom: 标记（按 images/ 图片自动命名确定性分类）
-          const mark = block.showExplicit && block.showKind && block.showKind !== 'other' ? `  # loom:${block.showKind}` : ''
-          lines.push(`${actualIndent}hide ${target}${mark}`)
+          // other 不写类型标记（按 images/ 图片自动命名确定性分类），版本标签正常写出
+          const mark = loomSuffix(block)
+          const withPart = block.transition ? ` with ${block.transition}` : ''
+          lines.push(`${actualIndent}hide ${target}${withPart}${mark}`)
         } else {
           lines.push(block.raw)
         }
         break
       }
       case 'default': {
-        lines.push(`${actualIndent}default ${block.varName} = ${block.varValue}`)
+        lines.push(`${actualIndent}default ${block.varName} = ${block.varValue}${loomSuffix(block)}`)
         break
       }
       case 'modify_var': {
         const op = block.modifyOp === 'add' ? '+=' : block.modifyOp === 'subtract' ? '-=' : '='
-        lines.push(`${actualIndent}$ ${block.varName} ${op} ${block.modifyValue}`)
+        lines.push(`${actualIndent}$ ${block.varName} ${op} ${block.modifyValue}${loomSuffix(block)}`)
         break
       }
       case 'if': {
         if (block.branches) {
           for (const branch of block.branches) {
             if (branch.type === 'if') {
-              lines.push(`${actualIndent}if ${branch.condition ?? ''}:`)
+              lines.push(`${actualIndent}if ${branch.condition ?? ''}:${loomSuffix(block)}`)
             } else if (branch.type === 'elif') {
               lines.push(`${actualIndent}elif ${branch.condition ?? ''}:`)
             } else {
@@ -310,7 +348,7 @@ function serializeBlocksWithIndent(blocks: DialogueBlock[], baseIndent: string):
         break
       }
       case 'menu': {
-        lines.push(`${actualIndent}menu:`)
+        lines.push(`${actualIndent}menu:${loomSuffix(block)}`)
         if (block.options) {
           const optIndent = actualIndent + '    '
           for (const opt of block.options) {
@@ -318,6 +356,7 @@ function serializeBlocksWithIndent(blocks: DialogueBlock[], baseIndent: string):
             if (opt.target) {
               line += ` jump ${opt.target}`
             }
+            line += loomSuffix({ versions: opt.versions })
             lines.push(line)
             if (opt.children && opt.children.length > 0) {
               const childLines = serializeBlocksWithIndent(opt.children, optIndent + '    ')
@@ -392,10 +431,17 @@ export function updateBlock(
   return blocks.map((b, i) => (i === index ? { ...b, ...patch } : b))
 }
 
-// 创建新 block 的工厂函数
-export function createBlock(type: DialogueBlock['type'], line: number): DialogueBlock {
+// 创建新 block 的工厂函数（defaults 用于命令面板预设不同特效）
+export function createBlock(
+  type: DialogueBlock['type'],
+  line: number,
+  defaults?: Partial<DialogueBlock>
+): DialogueBlock {
   const base: DialogueBlock = { type, line, raw: '' }
+  return { ...createDefaultBlock(type, line, base), ...defaults }
+}
 
+function createDefaultBlock(type: DialogueBlock['type'], line: number, base: DialogueBlock): DialogueBlock {
   switch (type) {
     case 'label':
       return { ...base, labelName: 'new_label' }
@@ -413,6 +459,9 @@ export function createBlock(type: DialogueBlock['type'], line: number): Dialogue
       return { ...base, showKind: 'sprite', showCharVar: 'char', showSprite: 'normal', raw: 'show char normal' }
     case 'hide':
       return { ...base, showKind: 'sprite', showCharVar: 'char', showSprite: 'normal', raw: 'hide char normal' }
+    case 'effect':
+      // 无默认特效：创建后由编辑弹窗挑选具体转场/震动
+      return { ...base }
     case 'default':
       return { ...base, varName: 'variable', varValue: '0' }
     case 'modify_var':
@@ -657,9 +706,88 @@ export function addBranch(
     condition: branchType === 'elif' ? (condition ?? 'variable == "value"') : undefined,
     children: [],
   }
-  branches.push(newBranch)
+  if (branchType === 'elif') {
+    // elif 必须插到最后一个 else 之前（Ren'Py 要求 if→elif→else 顺序）
+    const lastElseIdx = branches.reduce((acc, b, i) => (b.type === 'else' ? i : acc), -1)
+    if (lastElseIdx >= 0) {
+      branches.splice(lastElseIdx, 0, newBranch)
+    } else {
+      branches.push(newBranch)
+    }
+  } else {
+    branches.push(newBranch)
+  }
 
   return blocks.map((b, i) => (i === blockIndex ? { ...b, branches } : b))
+}
+
+// ---- 深路径版本：支持嵌套 if 块（位于 option/branch children 内）的分支操作 ----
+// ifPath = if 块在顶层 blocks 中的深路径（顶层 if 时长度 1，如 [1]；嵌套时如 [2, 0, 0]）
+
+// 沿 ifPath 递归进入容器，定位 if 块后应用 leaf 操作（leaf 接收容器 blocks + 该块索引）
+function mapDeepIfContainer(
+  blocks: DialogueBlock[],
+  ifPath: number[],
+  leaf: (containerBlocks: DialogueBlock[], idx: number) => DialogueBlock[]
+): DialogueBlock[] {
+  if (ifPath.length === 1) return leaf(blocks, ifPath[0])
+  const [blockIdx, secondIdx, ...restPath] = ifPath
+  const block = blocks[blockIdx]
+  if (!block) return blocks
+
+  // if 块作为容器：进入 branch.children
+  if (block.type === 'if' && block.branches) {
+    const branch = block.branches[secondIdx]
+    if (!branch) return blocks
+    const newChildren = mapDeepIfContainer(branch.children, restPath, leaf)
+    const newBranches = [...block.branches]
+    newBranches[secondIdx] = { ...branch, children: newChildren }
+    return blocks.map((b, i) => (i === blockIdx ? { ...b, branches: newBranches } : b))
+  }
+  // menu 块作为容器：进入 option.children
+  if (block.type === 'menu' && block.options) {
+    const opt = block.options[secondIdx]
+    if (!opt) return blocks
+    const newChildren = mapDeepIfContainer(opt.children ?? [], restPath, leaf)
+    const newOptions = [...block.options]
+    newOptions[secondIdx] = { ...opt, children: newChildren }
+    return blocks.map((b, i) => (i === blockIdx ? { ...b, options: newOptions } : b))
+  }
+  // 普通有 children 的块
+  if (block.children) {
+    const newChildren = mapDeepIfContainer(block.children, [secondIdx, ...restPath], leaf)
+    return blocks.map((b, i) => (i === blockIdx ? { ...b, children: newChildren } : b))
+  }
+  return blocks
+}
+
+// 在嵌套 if 块中添加 elif/else 分支
+export function addBranchDeep(
+  blocks: DialogueBlock[],
+  ifPath: number[],
+  branchType: 'elif' | 'else',
+  condition?: string
+): DialogueBlock[] {
+  return mapDeepIfContainer(blocks, ifPath, (bs, idx) => addBranch(bs, idx, branchType, condition))
+}
+
+// 更新嵌套 if 块的某个 branch 条件
+export function updateBranchConditionDeep(
+  blocks: DialogueBlock[],
+  ifPath: number[],
+  branchIndex: number,
+  condition: string
+): DialogueBlock[] {
+  return mapDeepIfContainer(blocks, ifPath, (bs, idx) => updateBranchCondition(bs, idx, branchIndex, condition))
+}
+
+// 删除嵌套 if 块的某个 branch
+export function removeBranchDeep(
+  blocks: DialogueBlock[],
+  ifPath: number[],
+  branchIndex: number
+): DialogueBlock[] {
+  return mapDeepIfContainer(blocks, ifPath, (bs, idx) => removeBranch(bs, idx, branchIndex))
 }
 
 // 更新 if block 的某个 branch 的条件

@@ -1,8 +1,13 @@
 import { useEffect, useState, useRef } from 'react'
 import { useStore } from '../store/useStore'
+import { useVersionSchemes } from '../store/versionSchemes'
 import NonAsciiRenameDialog from '../components/NonAsciiRenameDialog'
 import PageHeader from '../components/ui/PageHeader'
 import type { NonAsciiRenameItem } from '../types'
+import { parseDialogue } from '../utils/dialogueParser'
+import { serializeBlocks } from '../utils/blockSerializer'
+import { filterBlocksByVersions } from '../utils/versionFilter'
+import { listStoryFiles } from '../utils/storyFiles'
 
 interface SdkStatus {
   found: boolean
@@ -134,6 +139,30 @@ export default function PackagePage() {
   // 非 ASCII 文件名预检（安卓加载失败根因之一）
   const [nonAsciiItems, setNonAsciiItems] = useState<NonAsciiRenameItem[] | null>(null)
   const [nonAsciiOpen, setNonAsciiOpen] = useState(false)
+
+  // ---- 版本方案（多版本导出）----
+  // 方案管理/选择/统计在右侧功能栏「版本方案」侧边栏；此处只读当前方案用于打包过滤
+  const vs = useVersionSchemes()
+  const activeScheme = vs.schemes.find((s) => s.name === vs.active) ?? null
+
+  useEffect(() => {
+    if (projectPath) vs.load(projectPath)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectPath])
+
+  // 读取全部剧情文件 → 按方案过滤 → 返回需要替换的内容（仅包含有变化的文件）
+  async function buildFilteredScripts(tags: string[]): Promise<Record<string, string> | null> {
+    if (!projectPath || tags.length === 0) return null
+    const storyFiles = await listStoryFiles(projectPath)
+    const scripts: Record<string, string> = {}
+    for (const rel of storyFiles) {
+      const content = await window.pupurin.readFile(projectPath, rel)
+      const { blocks } = filterBlocksByVersions(parseDialogue(content), tags)
+      const filtered = serializeBlocks(blocks)
+      if (filtered !== content) scripts[rel] = filtered
+    }
+    return Object.keys(scripts).length > 0 ? scripts : null
+  }
   // 预检拦截时是否来自「开始打包」点击（应用重命名后继续打包）
   const nonAsciiPendingPackage = useRef(false)
 
@@ -178,13 +207,23 @@ export default function PackagePage() {
     void checkSdk()
   }, [])
 
+  // 进入打包发布页自动展开右侧「版本方案」功能栏（与 UI 设计页一致）
+  const activeView = useStore((s) => s.activeView)
+  useEffect(() => {
+    if (activeView !== 'package') return
+    // 微延迟：等 FunctionBar 先完成「功能不可见时自动收起」的清理，再展开
+    const t = setTimeout(() => useStore.getState().openSidebar('package-versions'), 0)
+    return () => clearTimeout(t)
+  }, [activeView])
+
   async function handlePackage() {
     if (!currentProject?.path) return
     setPackaging(true)
     setError(null)
     setBuildsDir(null)
     try {
-      const result = await window.pupurin.packageGame(currentProject.path, 'all')
+      const scripts = await buildFilteredScripts(activeScheme?.tags ?? [])
+      const result = await window.pupurin.packageGame(currentProject.path, 'all', scripts ?? undefined)
       if (result.buildsDir) {
         setBuildsDir(result.buildsDir)
       }
@@ -207,10 +246,12 @@ export default function PackagePage() {
     setWebResult(null)
     setWebLogs(null)
     try {
+      const scripts = await buildFilteredScripts(activeScheme?.tags ?? [])
       const result = await window.pupurin.packageWeb(projectPath, {
         version: webCfg.version,
         iconPath: webCfg.iconPath,
         preview: webCfg.autoPreview,
+        scripts: scripts ?? undefined,
       })
       // 无论成败都保留完整日志，便于排查
       setWebLogs(result.logs)
@@ -244,11 +285,13 @@ export default function PackagePage() {
     setMobileResult(null)
     setMobileLogs(null)
     try {
+      const scripts = await buildFilteredScripts(activeScheme?.tags ?? [])
       const result = await window.pupurin.packageMobile(projectPath, {
         target: mobileCfg.target,
         bundle: mobileCfg.bundle,
         version: mobileCfg.version,
         packageName: mobileCfg.packageName,
+        scripts: scripts ?? undefined,
       })
       setMobileLogs(result.logs)
       if (result.outDir) {
@@ -317,6 +360,50 @@ export default function PackagePage() {
       {/* 主内容 */}
       <div className="flex-1 p-6 overflow-auto">
         <div className="max-w-2xl mx-auto space-y-6">
+          {/* 当前版本方案状态（管理与选择在右侧功能栏「版本方案」侧边栏） */}
+          <div
+            className={[
+              'rounded-lg border px-3 py-2 flex items-center gap-3 text-[11px]',
+              activeScheme
+                ? 'bg-loom-accent/10 border-loom-accent/30'
+                : 'bg-loom-bg border-dashed border-loom-border',
+            ].join(' ')}
+          >
+            {activeScheme ? (
+              <>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14" className="text-loom-accent flex-shrink-0">
+                  <path d="M20 8h-3V4H3c-1.1 0-2 .9-2 2v11h2a3 3 0 106 0h6a3 3 0 106 0h2V10l-3-2z" />
+                  <circle cx="7" cy="17" r="1.2" />
+                  <circle cx="17" cy="17" r="1.2" />
+                </svg>
+                <span className="text-loom-text font-medium">当前方案：</span>
+                <span className="font-mono text-loom-accent">{activeScheme.name}</span>
+                {activeScheme.tags.length > 0 && (
+                  <span className="flex items-center gap-1 flex-wrap">
+                    {activeScheme.tags.map((t) => (
+                      <span key={t} className="px-1.5 py-0.5 rounded bg-loom-accent/15 text-loom-accent text-[10px] font-mono">
+                        {t}
+                      </span>
+                    ))}
+                  </span>
+                )}
+                <span className="ml-auto text-loom-muted/80">
+                  {activeScheme.tags.length > 0
+                    ? '打包时将按此方案过滤剧情内容'
+                    : '该方案包含全部内容（未过滤）'}
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="text-loom-muted flex-shrink-0">未启用版本过滤：打包将包含全部剧情内容。</span>
+                <span className="text-loom-muted/60 truncate">
+                  可在右侧功能栏「版本方案」中创建并启用方案（给剧情块打标签后按方案导出）。
+                </span>
+              </>
+            )}
+          </div>
+
+          {/* 打包表单主内容 */}
           {/* SDK 状态 / 首次使用引导（两种打包共用） */}
           {checking ? (
             <div className="rounded-lg bg-loom-panel border border-loom-border p-4">
@@ -1331,3 +1418,4 @@ export default function PackagePage() {
     </div>
   )
 }
+
