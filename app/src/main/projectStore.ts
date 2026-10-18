@@ -4,7 +4,7 @@ import { app, dialog } from 'electron'
 import { promises as fs, constants as fsConstants } from 'node:fs'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import { randomBytes } from 'node:crypto'
 
 const execFileAsync = promisify(execFile)
@@ -370,6 +370,82 @@ export async function createProject(
   return project
 }
 
+// 项目显示信息：config.name（游戏显示名）与 build.version（打包版本号）
+export interface ProjectInfo {
+  title: string
+  version: string
+}
+
+// Ren'Py 字符串字面量转义：换行压平、反斜杠与引号转义
+function escapeRpyString(s: string): string {
+  return s.replace(/[\r\n]+/g, ' ').replace(/\\/g, '\\\\').replace(/"/g, '\\"').trim()
+}
+function unescapeRpyString(s: string): string {
+  return s.replace(/\\(.)/g, '$1')
+}
+
+// 读取 game/options.rpy 中的显示名与版本号；缺省回退为目录名与 "1.0"
+export async function readProjectInfo(projectPath: string): Promise<ProjectInfo> {
+  let content = ''
+  try {
+    content = await fs.readFile(join(projectPath, 'game', 'options.rpy'), 'utf-8')
+  } catch {
+    return { title: basename(projectPath), version: '1.0' }
+  }
+  const title =
+    content.match(/define\s+config\.name\s*=\s*_\(\s*"((?:[^"\\]|\\.)*)"\s*\)/)?.[1] ??
+    content.match(/define\s+config\.name\s*=\s*"((?:[^"\\]|\\.)*)"/)?.[1]
+  const version = content.match(/define\s+build\.version\s*=\s*"((?:[^"\\]|\\.)*)"/)?.[1]
+  return {
+    title: title ? unescapeRpyString(title) : basename(projectPath),
+    version: version ? unescapeRpyString(version) : '1.0',
+  }
+}
+
+// 更新 game/options.rpy 中的显示名与版本号（仅写入传入的字段），原子写
+export async function updateProjectInfo(
+  projectPath: string,
+  patch: { title?: string; version?: string }
+): Promise<ProjectInfo> {
+  const optionsPath = join(projectPath, 'game', 'options.rpy')
+  let content = await fs.readFile(optionsPath, 'utf-8')
+
+  if (typeof patch.title === 'string') {
+    const title = escapeRpyString(patch.title)
+    if (!title) throw new Error('项目名称不能为空')
+    if (/define\s+config\.name\s*=\s*_\(\s*".*?"\s*\)/.test(content)) {
+      content = content.replace(
+        /define\s+config\.name\s*=\s*_\(\s*".*?"\s*\)/,
+        `define config.name = _("${title}")`
+      )
+    } else if (/define\s+config\.name\s*=\s*".*?"/.test(content)) {
+      content = content.replace(/define\s+config\.name\s*=\s*".*?"/, `define config.name = "${title}"`)
+    } else {
+      content += `\ndefine config.name = _("${title}")\n`
+    }
+  }
+
+  if (typeof patch.version === 'string') {
+    const version = escapeRpyString(patch.version)
+    if (!version) throw new Error('版本号不能为空')
+    if (/define\s+build\.version\s*=/.test(content)) {
+      content = content.replace(/define\s+build\.version\s*=\s*".*?"/, `define build.version = "${version}"`)
+    } else if (/define\s+build\.name\s*=\s*".*?"/.test(content)) {
+      content = content.replace(
+        /define\s+build\.name\s*=\s*".*?"/,
+        (m) => `${m}\ndefine build.version = "${version}"`
+      )
+    } else {
+      content += `\ndefine build.version = "${version}"\n`
+    }
+  }
+
+  const tmp = optionsPath + '.tmp'
+  await fs.writeFile(tmp, content, 'utf-8')
+  await fs.rename(tmp, optionsPath)
+  return readProjectInfo(projectPath)
+}
+
 export async function openProject(id: string): Promise<Project | null> {
   const projects = await readStore()
   const idx = projects.findIndex((p) => p.id === id)
@@ -388,7 +464,8 @@ export async function deleteProject(id: string): Promise<void> {
 // 兼容两种目录布局：
 //   1. 标准布局：<root>/game/script.rpy
 //   2. 扁平布局：文件夹本身就是 game 目录，直接含 script.rpy
-export async function importProject(sourcePath: string): Promise<Project> {
+// opts.name 可指定应用内的项目目录名（归档导入时用于去重命名）
+export async function importProject(sourcePath: string, opts?: { name?: string }): Promise<Project> {
   const sourceRoot = resolve(sourcePath)
 
   // 检测布局：优先标准 game/ 目录，其次把整个目录当作 game 目录
@@ -409,7 +486,7 @@ export async function importProject(sourcePath: string): Promise<Project> {
     }
   }
 
-  const projectName = sourceRoot.split('/').pop() ?? '导入的项目'
+  const projectName = opts?.name?.trim() || sourceRoot.split('/').pop() || '导入的项目'
   const targetRoot = join(getDefaultProjectsDir(), projectName)
 
   // 检查目标是否已存在

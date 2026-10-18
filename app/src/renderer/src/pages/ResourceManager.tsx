@@ -1,9 +1,9 @@
 import { useEffect, useState, useCallback, useRef, Fragment } from 'react'
 import { useStore } from '../store/useStore'
 import { useResourcePreview } from '../store/resourcePreview'
-import NonAsciiRenameDialog from '../components/NonAsciiRenameDialog'
+import ProjectCheckDialog from '../components/ProjectCheckDialog'
 import PromptDialog from '../components/ui/PromptDialog'
-import type { NonAsciiRenameItem } from '../types'
+import type { MediaFormatItem, NonAsciiRenameItem, ProjectCheckTab } from '../types'
 
 interface FileEntry {
   name: string
@@ -69,11 +69,14 @@ export default function ResourceManager() {
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set())
 
   const [promptCfg, setPromptCfg] = useState<PromptConfig | null>(null)
-  // 非 ASCII 文件名检查弹窗
-  const [nonAsciiItems, setNonAsciiItems] = useState<NonAsciiRenameItem[] | null>(null)
-  const [nonAsciiOpen, setNonAsciiOpen] = useState(false)
-  // 检测到的不合规文件数（>0 时「检查文件名」按钮显示浅红色警示）
-  const [nonAsciiCount, setNonAsciiCount] = useState(0)
+  // 项目检查弹窗（非 ASCII 文件名 / 不支持的媒体格式，双选项卡）
+  const [asciiItems, setAsciiItems] = useState<NonAsciiRenameItem[]>([])
+  const [mediaItems, setMediaItems] = useState<MediaFormatItem[]>([])
+  const [checkOpen, setCheckOpen] = useState(false)
+  const [checkTab, setCheckTab] = useState<ProjectCheckTab>('ascii')
+  // 检测到的问题数（>0 时「检查」按钮显示浅红色警示）
+  const [asciiCount, setAsciiCount] = useState(0)
+  const [mediaCount, setMediaCount] = useState(0)
 
   function openPrompt(cfg: PromptConfig): void {
     setPromptCfg(cfg)
@@ -154,11 +157,11 @@ export default function ResourceManager() {
     }
   }, [projectPath])
 
-  // 首次加载：加载文件列表 + 自动扫描不合规文件名（按钮直接显示警示状态）
+  // 首次加载：加载文件列表 + 自动扫描项目问题（按钮直接显示警示状态）
   useEffect(() => {
     void loadTree()
     void loadDir('')
-    void refreshNonAsciiCount()
+    void refreshCheckCounts()
   }, [loadTree, loadDir])
 
   // 全局搜索 → 定位文件：切到父目录、选中并预览（非剧本/代码文件）
@@ -359,30 +362,36 @@ export default function ResourceManager() {
     }
   }
 
-  // 检查非 ASCII 文件名（Ren'Py 要求 ASCII，否则安卓加载失败）
-  async function handleCheckNonAscii(): Promise<void> {
+  // 检查项目问题：非 ASCII 文件名 + 不支持的媒体格式（两个选项卡共用弹窗与红点）
+  async function handleCheckProblems(): Promise<void> {
     if (!projectPath) return
     setErr(null)
     try {
-      const items = await window.pupurin.scanNonAsciiFiles(projectPath)
-      setNonAsciiCount(items.length)
-      if (items.length === 0) {
-        alert('未发现非 ASCII 文件名，项目已兼容安卓等移动平台。')
-        return
-      }
-      setNonAsciiItems(items)
-      setNonAsciiOpen(true)
+      const [ascii, media] = await Promise.all([
+        window.pupurin.scanNonAsciiFiles(projectPath),
+        window.pupurin.scanMediaFormats(projectPath),
+      ])
+      setAsciiItems(ascii)
+      setMediaItems(media)
+      setAsciiCount(ascii.length)
+      setMediaCount(media.length)
+      setCheckTab(ascii.length > 0 ? 'ascii' : 'media')
+      setCheckOpen(true)
     } catch (e) {
       setErr(String(e))
     }
   }
 
-  // 重命名应用后重新扫描，刷新按钮的警示状态
-  async function refreshNonAsciiCount(): Promise<void> {
+  // 处理完成后重新扫描，刷新按钮的警示状态
+  async function refreshCheckCounts(): Promise<void> {
     if (!projectPath) return
     try {
-      const items = await window.pupurin.scanNonAsciiFiles(projectPath)
-      setNonAsciiCount(items.length)
+      const [ascii, media] = await Promise.all([
+        window.pupurin.scanNonAsciiFiles(projectPath),
+        window.pupurin.scanMediaFormats(projectPath),
+      ])
+      setAsciiCount(ascii.length)
+      setMediaCount(media.length)
     } catch {
       /* ignore */
     }
@@ -601,14 +610,16 @@ export default function ResourceManager() {
               </svg>
             </button>
             <button
-              onClick={() => void handleCheckNonAscii()}
+              onClick={() => void handleCheckProblems()}
               title={
-                nonAsciiCount > 0
-                  ? `发现 ${nonAsciiCount} 个不合规文件名，点击检查并修复`
-                  : '检查文件名（非 ASCII 文件名会导致安卓加载失败）'
+                asciiCount + mediaCount > 0
+                  ? `发现 ${asciiCount > 0 ? `${asciiCount} 个不合规文件名` : ''}${
+                      asciiCount > 0 && mediaCount > 0 ? '、' : ''
+                    }${mediaCount > 0 ? `${mediaCount} 个不支持的媒体文件` : ''}，点击检查并修复`
+                  : '检查项目问题（非 ASCII 文件名 / 不支持的媒体格式）'
               }
               className={`p-1 rounded transition-colors ${
-                nonAsciiCount > 0
+                asciiCount + mediaCount > 0
                   ? 'text-loom-err hover:bg-loom-err/10'
                   : 'text-loom-muted hover:text-loom-accent hover:bg-loom-panel'
               }`}
@@ -801,15 +812,17 @@ export default function ResourceManager() {
         onCancel={cancelPrompt}
       />
 
-      {/* 非 ASCII 文件名检查/修复弹窗 */}
-      {nonAsciiOpen && nonAsciiItems && (
-        <NonAsciiRenameDialog
+      {/* 项目检查/修复弹窗：非 ASCII 文件名 / 不支持的媒体格式 */}
+      {checkOpen && (
+        <ProjectCheckDialog
           projectPath={projectPath}
-          items={nonAsciiItems}
-          onClose={() => setNonAsciiOpen(false)}
+          asciiItems={asciiItems}
+          mediaItems={mediaItems}
+          initialTab={checkTab}
+          onClose={() => setCheckOpen(false)}
           onApplied={() => {
             void refreshAll()
-            void refreshNonAsciiCount()
+            void refreshCheckCounts()
           }}
         />
       )}

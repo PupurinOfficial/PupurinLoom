@@ -3,6 +3,7 @@ import { useStore, type ViewId } from './store/useStore'
 import { usePreferences } from './store/preferences'
 import { usePlugins } from './store/plugins'
 import { useSidebarPrefs } from './store/sidebarPrefs'
+import { useAiProviders } from './store/aiProviders'
 import { fetchScript, parseSource, openLogSocket, parseProject } from './api/client'
 import ActivityBar from './components/ActivityBar'
 import FunctionBar from './components/FunctionBar'
@@ -64,6 +65,9 @@ function Ide({ projectPath }: { projectPath: string }) {
   const [running, setRunning] = useState(false)
   const [runError, setRunError] = useState<string | null>(null)
   const [showSettings, setShowSettings] = useState(false)
+  // 插件通过 loom.ai.openManager 请求打开「设置 → AI 管理」小节
+  const aiSettingsReq = useAiProviders((s) => s.managerOpen)
+  const aiFocusFeature = useAiProviders((s) => s.managerFeature)
   const [showSearch, setShowSearch] = useState(false)
   // 未保存确认弹窗：'close' = 关窗口 / 'back' = 返回项目列表
   const [closePrompt, setClosePrompt] = useState<'close' | 'back' | null>(null)
@@ -449,7 +453,15 @@ function Ide({ projectPath }: { projectPath: string }) {
       </div>
 
       <StatusBar />
-      <SettingsDialog open={showSettings} onClose={() => setShowSettings(false)} />
+      <SettingsDialog
+        open={showSettings || aiSettingsReq}
+        focusSection={aiSettingsReq ? 'ai' : null}
+        focusFeature={aiSettingsReq ? aiFocusFeature : null}
+        onClose={() => {
+          setShowSettings(false)
+          useAiProviders.getState().closeManager()
+        }}
+      />
       <SearchDialog open={showSearch} onClose={() => setShowSearch(false)} />
 
       {/* 未保存确认弹窗（关窗口 / 返回项目列表共用） */}
@@ -497,6 +509,7 @@ export default function App() {
   useEffect(() => {
     void usePreferences.getState().load()
     void usePlugins.getState().loadPlugins()
+    void useAiProviders.getState().ensureLoaded()
   }, [])
 
   // 功能栏偏好（插件面板加入/不加入）

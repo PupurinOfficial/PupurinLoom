@@ -100,10 +100,33 @@ const api = {
   openProject: (id: string): Promise<ProjectMeta | null> =>
     ipcRenderer.invoke('projects:open', id),
   deleteProject: (id: string): Promise<void> => ipcRenderer.invoke('projects:delete', id),
+  // 项目显示信息（config.name / build.version），更新会写回 game/options.rpy
+  readProjectInfo: (projectPath: string): Promise<{ title: string; version: string }> =>
+    ipcRenderer.invoke('projects:readInfo', projectPath),
+  updateProjectInfo: (projectPath: string, patch: { title?: string; version?: string }): Promise<{ title: string; version: string }> =>
+    ipcRenderer.invoke('projects:updateInfo', projectPath, patch),
   getDefaultDir: (): Promise<string> => ipcRenderer.invoke('projects:defaultDir'),
   getVisibleDir: (): Promise<string> => ipcRenderer.invoke('projects:visibleDir'),
   importProject: (sourcePath: string): Promise<ProjectMeta> =>
     ipcRenderer.invoke('projects:import', sourcePath),
+  // 项目导出 / 导入（.loom 归档，本质是 zip）
+  getExportSize: (projectPath: string): Promise<{ core: number; images: number; audio: number; video: number; rpyc: number; loomData: number }> =>
+    ipcRenderer.invoke('projects:exportSize', projectPath),
+  exportProject: (
+    projectPath: string,
+    opts: { images: boolean; audio: boolean; video: boolean; rpyc: boolean; loomData: boolean },
+    loomData?: Record<string, string>
+  ): Promise<{ cancelled: boolean; archivePath?: string; bytes?: number; files?: number }> =>
+    ipcRenderer.invoke('projects:export', projectPath, opts, loomData),
+  importProjectArchive: (): Promise<{ cancelled: boolean; project?: ProjectMeta; manifest?: unknown }> =>
+    ipcRenderer.invoke('projects:importArchive'),
+  onArchiveProgress: (
+    cb: (ev: { phase: 'pack' | 'unpack'; done?: number; total?: number; current?: string }) => void
+  ): (() => void) => {
+    const fn = (_e: unknown, ev: Parameters<typeof cb>[0]): void => cb(ev)
+    ipcRenderer.on('project:archiveProgress', fn)
+    return () => ipcRenderer.removeListener('project:archiveProgress', fn)
+  },
   showProjectInFinder: (projectPath: string): Promise<void> =>
     ipcRenderer.invoke('projects:showInFinder', projectPath),
   runGame: (projectPath: string): Promise<{ success: boolean; error?: string }> =>
@@ -312,6 +335,23 @@ const api = {
     ipcRenderer.invoke('project:scanNonAsciiFiles', projectPath),
   applyNonAsciiRename: (projectPath: string, items: Array<{ dir: string; oldName: string; newName: string; isDir: boolean }>): Promise<{ logs: string[]; count: number; patchedFiles: number }> =>
     ipcRenderer.invoke('project:applyNonAsciiRename', projectPath, items),
+  // 不支持的媒体格式检查与修复（用 ffmpeg 转成 Ren'Py 支持的格式）
+  scanMediaFormats: (
+    projectPath: string
+  ): Promise<Array<{ dir: string; name: string; kind: 'image' | 'audio' | 'video'; reason: string; suggested: string; targetExt: string }>> =>
+    ipcRenderer.invoke('project:scanMediaFormats', projectPath),
+  applyMediaConvert: (
+    projectPath: string,
+    items: Array<{ dir: string; name: string; newName: string; kind: 'image' | 'audio' | 'video' }>
+  ): Promise<{ logs: string[]; count: number; failed: Array<{ file: string; error: string }>; patchedFiles: number }> =>
+    ipcRenderer.invoke('project:applyMediaConvert', projectPath, items),
+  onMediaConvertProgress: (
+    cb: (ev: { phase: 'ffmpeg' | 'convert'; message?: string; done?: number; total?: number; current?: string }) => void
+  ): (() => void) => {
+    const fn = (_e: unknown, ev: Parameters<typeof cb>[0]): void => cb(ev)
+    ipcRenderer.on('project:mediaConvertProgress', fn)
+    return () => ipcRenderer.removeListener('project:mediaConvertProgress', fn)
+  },
   listRpyFiles: (projectPath: string): Promise<RpyFileNode[]> =>
     ipcRenderer.invoke('fs:listRpyFiles', projectPath),
   saveRpyFile: (projectPath: string, subPath: string, content: string): Promise<void> =>

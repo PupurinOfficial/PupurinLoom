@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react'
 import { useStore } from '../store/useStore'
 import SettingsDialog from '../components/SettingsDialog'
 import ReleaseNotes from '../components/ReleaseNotes'
+import ExportProjectDialog from '../components/ExportProjectDialog'
+import { restoreLoomData } from '../store/projectArchiveData'
 import type { ProjectMeta, UpdateCheckResult } from '../types'
 import logoUrl from '../assets/pupurin-logo.png'
 
 // 与 package.json version 保持一致（发版时同步更新）
-const APP_VERSION = '0.6.1'
+const APP_VERSION = '0.6.2'
 
 export default function ProjectPicker() {
   const projects = useStore((s) => s.projects)
@@ -29,6 +31,10 @@ export default function ProjectPicker() {
   const [checking, setChecking] = useState(false)
   const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null)
   const [showUpdate, setShowUpdate] = useState(false)
+  // 导出项目（.loom 归档）弹窗对应的项目
+  const [exportTarget, setExportTarget] = useState<ProjectMeta | null>(null)
+  // 当前正在执行的导入类型（仅用于在对应按钮上显示进行中文案）
+  const [importing, setImporting] = useState<'loom' | 'renpy' | null>(null)
 
   // 由目录名自动推导的默认内部名（仅 ASCII，用于打包）
   const autoBuild = (newName.trim().replace(/[^a-zA-Z0-9]/g, '') || 'game').toLowerCase()
@@ -131,13 +137,15 @@ export default function ProjectPicker() {
   }
 
   // 导入已有 Ren'Py 项目：选择目录 → 注册项目 → 自动解析角色和差分
-  async function handleImport(): Promise<void> {
+  async function handleImportRenpy(): Promise<void> {
     setBusy(true)
+    setImporting('renpy')
     setErr(null)
     try {
       const dir = await window.pupurin.pickDirectory()
       if (!dir) {
         setBusy(false)
+        setImporting(null)
         return
       }
       const project = await window.pupurin.importProject(dir)
@@ -149,6 +157,32 @@ export default function ProjectPicker() {
       setErr(String(e))
     } finally {
       setBusy(false)
+      setImporting(null)
+    }
+  }
+
+  // 导入 Loom 项目：选择 .loom 归档 → 解压校验 → 复制注册 → 回填 Loom 侧配置
+  async function handleImportLoom(): Promise<void> {
+    setBusy(true)
+    setImporting('loom')
+    setErr(null)
+    try {
+      const r = await window.pupurin.importProjectArchive()
+      if (r.cancelled || !r.project) {
+        setBusy(false)
+        setImporting(null)
+        return
+      }
+      // 版本方案、项目简介、来点灵感、打包配置等随项目迁移
+      restoreLoomData(r.project.path, r.manifest?.loomData)
+      await window.pupurin.parseCharactersFromScript(r.project.path)
+      await refresh()
+      setCurrentProject(r.project)
+    } catch (e) {
+      setErr(String(e))
+    } finally {
+      setBusy(false)
+      setImporting(null)
     }
   }
 
@@ -440,30 +474,53 @@ export default function ProjectPicker() {
             )}
           </div>
 
-          {/* 导入项目卡片 */}
-          <div className="mb-6 rounded-lg bg-loom-panel border border-loom-border">
+          {/* 导入 Loom 项目（.loom 归档，含 Loom 侧配置） */}
+          <div className="mb-3 rounded-lg bg-loom-panel border border-loom-border">
             <button
-              onClick={() => void handleImport()}
+              onClick={() => void handleImportLoom()}
               disabled={busy}
               className="w-full flex items-center gap-3 px-4 py-3 text-left disabled:opacity-50"
               style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
             >
-              <div className="w-9 h-9 rounded-lg bg-loom-accent/15 flex items-center justify-center">
+              <div className="w-9 h-9 rounded-lg bg-loom-accent/20 flex items-center justify-center">
                 <svg viewBox="0 0 24 24" fill="none" stroke="#FFE4A6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="20" height="20">
                   <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
                   <path d="M7 10l5 5 5-5" />
                   <path d="M12 15V3" />
                 </svg>
               </div>
-              <div>
-                <div className="text-sm font-medium">导入已有项目</div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium">
+                  导入 Loom 项目 <span className="text-[10px] font-mono text-loom-accent">.loom</span>
+                </div>
+                <div className="text-xs text-loom-muted">
+                  从 Loom 归档恢复，连同版本方案、项目简介等配置一起迁移
+                </div>
+              </div>
+              {importing === 'loom' && <span className="ml-auto text-xs text-loom-accent font-mono">处理中…</span>}
+            </button>
+          </div>
+
+          {/* 导入 Ren'Py 项目（选择已有项目文件夹） */}
+          <div className="mb-6 rounded-lg bg-loom-panel border border-loom-border">
+            <button
+              onClick={() => void handleImportRenpy()}
+              disabled={busy}
+              className="w-full flex items-center gap-3 px-4 py-3 text-left disabled:opacity-50"
+              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+            >
+              <div className="w-9 h-9 rounded-lg bg-loom-accent/15 flex items-center justify-center">
+                <svg viewBox="0 0 24 24" fill="none" stroke="#FFE4A6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="20" height="20">
+                  <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                </svg>
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium">导入 Ren'Py 项目</div>
                 <div className="text-xs text-loom-muted">
                   选择 Ren'Py 项目文件夹，自动解析角色与立绘差分
                 </div>
               </div>
-              {busy && (
-                <span className="ml-auto text-xs text-loom-accent font-mono">导入中…</span>
-              )}
+              {importing === 'renpy' && <span className="ml-auto text-xs text-loom-accent font-mono">处理中…</span>}
             </button>
           </div>
 
@@ -524,6 +581,18 @@ export default function ProjectPicker() {
                     >
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="16" height="16">
                         <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                      </svg>
+                    </button>
+                    <button
+                      onClick={() => setExportTarget(p)}
+                      disabled={busy || p._missing}
+                      title="导出为 .loom 归档"
+                      className="p-1.5 rounded text-loom-muted hover:text-loom-accent hover:bg-loom-accent/10 transition-colors disabled:opacity-40"
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="16" height="16">
+                        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+                        <path d="M17 8l-5-5-5 5" />
+                        <path d="M12 3v12" />
                       </svg>
                     </button>
                     <button
@@ -692,6 +761,14 @@ export default function ProjectPicker() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* 导出项目（.loom 归档） */}
+      {exportTarget && (
+        <ExportProjectDialog
+          projectPath={exportTarget.path}
+          onClose={() => setExportTarget(null)}
+        />
       )}
     </div>
   )

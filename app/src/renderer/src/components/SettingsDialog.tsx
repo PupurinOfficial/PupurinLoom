@@ -1,6 +1,13 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { usePreferences, THEME_PRESETS, DEFAULT_PRESET_ID } from '../store/preferences'
 import { usePlugins } from '../store/plugins'
+import {
+  useAiProviders,
+  AI_TEMPLATES,
+  AI_ICON_CHOICES,
+  chatUrl,
+  requestChat,
+} from '../store/aiProviders'
 import PluginIcon from './PluginIcon'
 import ReleaseNotes from './ReleaseNotes'
 import type { UpdateCheckResult } from '../types'
@@ -8,11 +15,15 @@ import type { UpdateCheckResult } from '../types'
 interface Props {
   open: boolean
   onClose: () => void
+  /** 打开时滚动定位到指定小节（由插件 loom.ai.openManager 触发时为 'ai'） */
+  focusSection?: 'ai' | null
+  /** 插件请求打开时聚焦的功能（用于自动展开其绑定的接口卡片） */
+  focusFeature?: string | null
 }
 
 // 应用设置弹窗（项目选择页与 IDE 共用）
 // 主题/字号即时生效并持久化；SDK 路径为显式保存/应用。
-export default function SettingsDialog({ open, onClose }: Props) {
+export default function SettingsDialog({ open, onClose, focusSection = null, focusFeature = null }: Props) {
   const mode = usePreferences((s) => s.mode)
   const presetId = usePreferences((s) => s.presetId)
   const customAccent = usePreferences((s) => s.customAccent)
@@ -38,6 +49,21 @@ export default function SettingsDialog({ open, onClose }: Props) {
   const toggleEnabled = usePlugins((s) => s.toggleEnabled)
   const trustAndEnable = usePlugins((s) => s.trustAndEnable)
 
+  // AI 管理（内联小节）
+  const aiProviders = useAiProviders((s) => s.config.providers)
+  const aiDefaultId = useAiProviders((s) => s.config.defaultId)
+  const aiAdd = useAiProviders((s) => s.addProvider)
+  const aiUpdate = useAiProviders((s) => s.updateProvider)
+  const aiRemove = useAiProviders((s) => s.removeProvider)
+  const aiSetDefault = useAiProviders((s) => s.setDefault)
+  const aiSectionRef = useRef<HTMLElement>(null)
+  // 展开编辑的接口 id（同时只展开一个，保持页面简洁）
+  const [aiExpandedId, setAiExpandedId] = useState<string | null>(null)
+  const [aiShowKey, setAiShowKey] = useState<Record<string, boolean>>({})
+  const [aiConfirmDel, setAiConfirmDel] = useState<string | null>(null)
+  const [aiTestingId, setAiTestingId] = useState<string | null>(null)
+  const [aiTestRes, setAiTestRes] = useState<Record<string, { ok: boolean; msg: string }>>({})
+
   useEffect(() => {
     if (!open) return
     setUpdateResult(null)
@@ -49,7 +75,23 @@ export default function SettingsDialog({ open, onClose }: Props) {
       })
       .catch(() => {})
     void loadPlugins()
+    void useAiProviders.getState().ensureLoaded()
   }, [open, loadPlugins])
+
+  // 从插件拉起时定位到 AI 小节，并展开相关接口
+  useEffect(() => {
+    if (!open || focusSection !== 'ai') return
+    const st = useAiProviders.getState()
+    void st.ensureLoaded().then(() => {
+      const cfg = useAiProviders.getState().config
+      const preferred = (focusFeature ? cfg.bindings[focusFeature] : null) || cfg.defaultId || cfg.providers[0]?.id || null
+      setAiExpandedId(preferred)
+      window.requestAnimationFrame(() => {
+        aiSectionRef.current?.scrollIntoView({ block: 'start' })
+      })
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, focusSection, focusFeature])
 
   if (!open) return null
 
@@ -331,6 +373,288 @@ export default function SettingsDialog({ open, onClose }: Props) {
                 )}
               </div>
             )}
+          </section>
+
+          {/* AI 管理：多接口配置 + 全局默认（内联于设置页） */}
+          <section ref={aiSectionRef}>
+            <div className={sectionTitle}>AI 管理</div>
+            <p className="text-[11px] text-loom-muted/70 mb-2">
+              配置多个 AI 接口（OpenAI 兼容协议，支持常见服务商模板），供「铃光时刻」等 AI 功能与插件选用；也可在插件内直接选择或新增。
+              当前 {aiProviders.length} 个 · 默认：
+              {aiProviders.find((p) => p.id === aiDefaultId)?.name ?? '未设置'}
+            </p>
+
+            {/* 接口卡片列表 */}
+            <div className="space-y-2">
+              {aiProviders.length === 0 && (
+                <div className="rounded border border-dashed border-loom-border px-3 py-4 text-center text-xs text-loom-muted">
+                  还没有配置接口，点击下方「新增 AI 接口」开始
+                </div>
+              )}
+              {aiProviders.map((p) => {
+                const expanded = aiExpandedId === p.id
+                const invalid = !/^https?:\/\//i.test((p.baseUrl || '').trim())
+                const tpl = AI_TEMPLATES.find((t) => t.id === p.templateId)
+                const res = aiTestRes[p.id]
+                return (
+                  <div
+                    key={p.id}
+                    className={`rounded border bg-loom-bg ${
+                      expanded ? 'border-loom-accent/60' : 'border-loom-border'
+                    }`}
+                  >
+                    {/* 卡片头：图标 + 名称 + 状态，点击展开编辑 */}
+                    <button
+                      type="button"
+                      onClick={() => setAiExpandedId(expanded ? null : p.id)}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-left"
+                    >
+                      <span className="text-base leading-none w-5 flex-shrink-0 text-center">{p.icon || '⭐'}</span>
+                      <span className="text-xs font-medium truncate">{p.name}</span>
+                      {p.id === aiDefaultId && (
+                        <span className="text-[10px] px-1 rounded bg-loom-accent/20 text-loom-accent flex-shrink-0">
+                          默认
+                        </span>
+                      )}
+                      <span className="text-[11px] text-loom-muted truncate">
+                        {p.model || '未填模型'}
+                        {!p.apiKey && ' · 未设 Key'}
+                        {invalid && <span className="text-loom-err"> · 接口地址无效</span>}
+                      </span>
+                      <span className="ml-auto text-[11px] text-loom-muted flex-shrink-0">
+                        {expanded ? '收起' : '编辑'}
+                      </span>
+                    </button>
+
+                    {expanded && (
+                      <div className="px-3 pb-3 space-y-3 border-t border-loom-border pt-3">
+                        {/* 图标 */}
+                        <div>
+                          <div className="text-xs text-loom-muted mb-1">图标</div>
+                          <div className="flex flex-wrap items-center gap-1">
+                            {AI_ICON_CHOICES.map((ic) => (
+                              <button
+                                key={ic}
+                                type="button"
+                                onClick={() => aiUpdate(p.id, { icon: ic })}
+                                className={`w-7 h-7 rounded border text-sm leading-none transition-colors ${
+                                  p.icon === ic
+                                    ? 'border-loom-accent bg-loom-accent/10'
+                                    : 'border-loom-border hover:bg-loom-border/30'
+                                }`}
+                                title={'使用图标 ' + ic}
+                              >
+                                {ic}
+                              </button>
+                            ))}
+                            <input
+                              className="w-16 bg-loom-bg border border-loom-border rounded px-2 py-1 text-sm text-center"
+                              value={p.icon}
+                              maxLength={4}
+                              onChange={(e) => aiUpdate(p.id, { icon: e.target.value })}
+                              placeholder="自定义"
+                              title="也可以直接输入任意 emoji 或短文本"
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="text-xs text-loom-muted mb-1">名称</div>
+                          <input
+                            className={inputCls}
+                            value={p.name}
+                            onChange={(e) => aiUpdate(p.id, { name: e.target.value })}
+                            placeholder="例如：DeepSeek 主力"
+                          />
+                        </div>
+
+                        <div>
+                          <div className="text-xs text-loom-muted mb-1">服务商模板（选填，用于快速填充）</div>
+                          <select
+                            className={inputCls}
+                            value={p.templateId}
+                            onChange={(e) => {
+                              const prevTpl = AI_TEMPLATES.find((t) => t.id === p.templateId)
+                              const next = AI_TEMPLATES.find((t) => t.id === e.target.value)
+                              // 图标仅在用户未自定义过时跟随模板，避免覆盖手选图标
+                              const iconUntouched = !p.icon || (!!prevTpl && p.icon === prevTpl.icon)
+                              aiUpdate(p.id, {
+                                templateId: e.target.value,
+                                icon: iconUntouched && next ? next.icon : p.icon,
+                                baseUrl: next && next.baseUrl ? next.baseUrl : p.baseUrl,
+                                model: next && next.models[0] ? next.models[0] : p.model,
+                              })
+                              setAiTestRes((m) => ({ ...m, [p.id]: { ok: false, msg: '' } }))
+                            }}
+                          >
+                            {AI_TEMPLATES.map((t) => (
+                              <option key={t.id} value={t.id}>
+                                {t.icon} {t.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <div className="text-xs text-loom-muted mb-1">接口地址（BaseURL，可填到版本号）</div>
+                          <input
+                            className={inputCls}
+                            value={p.baseUrl}
+                            onChange={(e) => aiUpdate(p.id, { baseUrl: e.target.value })}
+                            placeholder="https://api.deepseek.com/v1"
+                          />
+                          <div className="text-[11px] text-loom-muted/70 mt-1 truncate">
+                            实际请求：{chatUrl(p.baseUrl) || '（尚未填写）'}
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="text-xs text-loom-muted mb-1">API Key</div>
+                          <div className="flex items-center gap-2">
+                            <input
+                              className={inputCls}
+                              type={aiShowKey[p.id] ? 'text' : 'password'}
+                              value={p.apiKey}
+                              onChange={(e) => aiUpdate(p.id, { apiKey: e.target.value })}
+                              placeholder="sk-..."
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setAiShowKey((m) => ({ ...m, [p.id]: !m[p.id] }))}
+                              className={btnCls}
+                            >
+                              {aiShowKey[p.id] ? '隐藏' : '显示'}
+                            </button>
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="text-xs text-loom-muted mb-1">模型名</div>
+                          <input
+                            className={inputCls}
+                            value={p.model}
+                            onChange={(e) => aiUpdate(p.id, { model: e.target.value })}
+                            placeholder={tpl?.models[0] ?? 'deepseek-chat'}
+                            list={tpl && tpl.models.length ? 'loom-ai-models-' + p.id : undefined}
+                          />
+                          {tpl && tpl.models.length > 0 && (
+                            <datalist id={'loom-ai-models-' + p.id}>
+                              {tpl.models.map((m) => (
+                                <option key={m} value={m} />
+                              ))}
+                            </datalist>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <button
+                            type="button"
+                            disabled={aiTestingId === p.id}
+                            onClick={() => {
+                              setAiTestingId(p.id)
+                              setAiTestRes((m) => ({ ...m, [p.id]: { ok: true, msg: '测试中…' } }))
+                              const t0 = Date.now()
+                              const target = { ...p }
+                              void requestChat(
+                                target,
+                                [
+                                  { role: 'system', content: '你是连通性测试助手。' },
+                                  { role: 'user', content: '只回复两个字：可用' },
+                                ],
+                                { maxTokens: 16, timeoutMs: 30000 }
+                              )
+                                .then((r) => {
+                                  const ms = Date.now() - t0
+                                  setAiTestRes((m) => ({
+                                    ...m,
+                                    [p.id]: r.ok
+                                      ? {
+                                          ok: true,
+                                          msg: `连接成功（${ms}ms）：${(r.content || '').trim().slice(0, 60) || '（空响应）'}`,
+                                        }
+                                      : { ok: false, msg: r.error || `HTTP ${r.status}` },
+                                  }))
+                                })
+                                .catch((e) => {
+                                  setAiTestRes((m) => ({
+                                    ...m,
+                                    [p.id]: { ok: false, msg: e instanceof Error ? e.message : String(e) },
+                                  }))
+                                })
+                                .finally(() => setAiTestingId(null))
+                            }}
+                            className={btnCls + ' !border-loom-accent/50 !text-loom-accent'}
+                          >
+                            {aiTestingId === p.id ? '测试中…' : '测试连接'}
+                          </button>
+                          {p.id !== aiDefaultId && (
+                            <button type="button" onClick={() => aiSetDefault(p.id)} className={btnCls}>
+                              设为默认
+                            </button>
+                          )}
+                          {aiConfirmDel === p.id ? (
+                            <>
+                              <span className="text-xs text-loom-err">确认删除该接口？</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  aiRemove(p.id)
+                                  setAiConfirmDel(null)
+                                  setAiExpandedId(null)
+                                }}
+                                className={btnCls + ' !border-loom-err/50 !text-loom-err'}
+                              >
+                                确认删除
+                              </button>
+                              <button type="button" onClick={() => setAiConfirmDel(null)} className={btnCls}>
+                                取消
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setAiConfirmDel(p.id)}
+                              className={btnCls + ' !text-loom-muted'}
+                            >
+                              删除
+                            </button>
+                          )}
+                        </div>
+
+                        {res && res.msg && (
+                          <div
+                            className={`px-3 py-2 rounded border text-xs leading-relaxed break-all ${
+                              res.ok
+                                ? 'bg-loom-accent/10 border-loom-accent/40 text-loom-accent'
+                                : 'bg-loom-err/15 border-loom-err/40 text-loom-err'
+                            }`}
+                          >
+                            {res.msg}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+
+            <div className="mt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const id = aiAdd({ name: '新 AI 服务', templateId: 'custom' })
+                  setAiExpandedId(id)
+                }}
+                className={btnCls + ' w-full'}
+              >
+                ＋ 新增 AI 接口
+              </button>
+            </div>
+
+            <p className="text-[11px] text-loom-muted/70 mt-2">
+              API Key 明文保存在本机 settings.json，不上传任何服务器。修改即时生效。
+            </p>
           </section>
 
           {/* 插件中心 */}

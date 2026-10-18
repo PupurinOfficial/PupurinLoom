@@ -2,6 +2,13 @@ import { create } from 'zustand'
 import type { PluginMeta } from '../types'
 import { useStore } from './useStore'
 import { parseSource } from '../api/client'
+import {
+  useAiProviders,
+  requestChat,
+  providerSelectorHtml,
+  bindProviderSelector,
+} from './aiProviders'
+import { readProfile, projectProfileBlock } from './projectProfile'
 
 // ---- 插件运行时（渲染层）----
 // 每个插件通过 new Function('loom', code) 执行，仅注入白名单 loom API。
@@ -268,6 +275,12 @@ function buildLoomApi(
     },
     project: {
       getPath: (): string | null => getProject()?.path ?? null,
+      // 项目简介（标签 + 简介）：插件可拼进自己的提示词；block 为可直接拼的文本块（无简介时为空串）
+      profile: (): { tags: string[]; intro: string; block: string } => {
+        const p = getProject()?.path ?? ''
+        const { tags, intro } = p ? readProfile(p) : { tags: [], intro: '' }
+        return { tags, intro, block: projectProfileBlock(p) }
+      },
       // 当前打开的文件（game/ 相对路径，如 script.rpy）
       currentFile: (): string | null => useStore.getState().currentFilePath,
       readScript: async (): Promise<string | null> => {
@@ -411,6 +424,77 @@ function buildLoomApi(
         if (!p) return Promise.resolve('未打开项目')
         return window.pupurin.pluginShellOpenPath(p.path, subPath)
       },
+    },
+    // AI 接口：使用玩家在「AI 管理」中配置的接口（多接口 + 全局默认 + 按功能绑定）
+    ai: {
+      // 列出全部接口（不含 API Key）
+      list: async (): Promise<unknown[]> => {
+        await useAiProviders.getState().ensureLoaded()
+        return useAiProviders.getState().publicList()
+      },
+      getDefault: async (): Promise<unknown> => {
+        await useAiProviders.getState().ensureLoaded()
+        return useAiProviders.getState().publicDefault()
+      },
+      // 该功能当前绑定的接口 id；null = 跟随默认
+      getSelected: async (featureId: string): Promise<string | null> => {
+        await useAiProviders.getState().ensureLoaded()
+        return useAiProviders.getState().config.bindings[featureId] ?? null
+      },
+      setSelected: async (featureId: string, providerId: string | null): Promise<void> => {
+        await useAiProviders.getState().ensureLoaded()
+        useAiProviders.getState().setBinding(featureId, providerId ?? null)
+      },
+      // 解析该功能实际应使用的接口（含明文 Key）；无可用接口时返回 null
+      resolve: async (
+        featureId: string
+      ): Promise<{ id: string; name: string; icon: string; baseUrl: string; apiKey: string; model: string; source: 'binding' | 'default' } | null> => {
+        await useAiProviders.getState().ensureLoaded()
+        const st = useAiProviders.getState()
+        const p = st.resolveFor(featureId)
+        if (!p) return null
+        const bound = st.config.bindings[featureId] ?? null
+        return {
+          id: p.id,
+          name: p.name,
+          icon: p.icon,
+          baseUrl: p.baseUrl,
+          apiKey: p.apiKey,
+          model: p.model,
+          source: bound === p.id ? 'binding' : 'default',
+        }
+      },
+      // 用该功能所选接口发起 OpenAI 兼容请求
+      chat: async (
+        messages: unknown[],
+        opts?: { featureId?: string; temperature?: number; maxTokens?: number; json?: boolean; timeoutMs?: number }
+      ): Promise<{ ok: boolean; status: number; text: string; content: string; error?: string; providerId: string }> => {
+        await useAiProviders.getState().ensureLoaded()
+        const st = useAiProviders.getState()
+        const p = st.resolveFor(opts?.featureId)
+        if (!p) throw new Error('未配置可用的 AI 接口，请先在「AI 管理」中添加并选择')
+        const r = await requestChat(p, messages, {
+          temperature: opts?.temperature,
+          maxTokens: opts?.maxTokens,
+          json: opts?.json,
+          timeoutMs: opts?.timeoutMs,
+        })
+        return { ...r, providerId: p.id }
+      },
+      // 打开「设置 → AI 管理」小节（玩家可在插件内新增接口）
+      openManager: async (featureId?: string): Promise<void> => {
+        await useAiProviders.getState().ensureLoaded()
+        useAiProviders.getState().openManager(featureId ?? null)
+      },
+      // 生成选择器 HTML（含「跟随默认」与「＋ 新增 AI 服务…」），供 HTML 面板嵌入
+      providerSelectorHtml: (featureId: string, opts?: { className?: string; noneLabel?: string }): string =>
+        providerSelectorHtml(featureId, opts),
+      // 绑定选择器：变更即写入绑定，选「新增」拉起管理弹窗；返回卸载函数
+      bindProviderSelector: (
+        root: HTMLElement,
+        featureId: string,
+        onChange?: (providerId: string | null) => void
+      ): (() => void) => bindProviderSelector(root, featureId, onChange),
     },
   }
 }

@@ -1,9 +1,9 @@
 import { useEffect, useState, useRef } from 'react'
 import { useStore } from '../store/useStore'
 import { useVersionSchemes } from '../store/versionSchemes'
-import NonAsciiRenameDialog from '../components/NonAsciiRenameDialog'
+import ProjectCheckDialog from '../components/ProjectCheckDialog'
 import PageHeader from '../components/ui/PageHeader'
-import type { NonAsciiRenameItem } from '../types'
+import type { MediaFormatItem, NonAsciiRenameItem, ProjectCheckTab } from '../types'
 import { parseDialogue } from '../utils/dialogueParser'
 import { serializeBlocks } from '../utils/blockSerializer'
 import { filterBlocksByVersions } from '../utils/versionFilter'
@@ -136,9 +136,11 @@ export default function PackagePage() {
   const [mobileResult, setMobileResult] = useState<{ outDir: string; logs: string[] } | null>(null)
   // 工具链引导面板默认折叠，避免页面过长
   const [guideOpen, setGuideOpen] = useState(false)
-  // 非 ASCII 文件名预检（安卓加载失败根因之一）
-  const [nonAsciiItems, setNonAsciiItems] = useState<NonAsciiRenameItem[] | null>(null)
-  const [nonAsciiOpen, setNonAsciiOpen] = useState(false)
+  // 打包预检（非 ASCII 文件名 / 不支持的媒体格式，两者都会导致移动端加载失败）
+  const [asciiItems, setAsciiItems] = useState<NonAsciiRenameItem[]>([])
+  const [mediaItems, setMediaItems] = useState<MediaFormatItem[]>([])
+  const [checkOpen, setCheckOpen] = useState(false)
+  const [checkTab, setCheckTab] = useState<ProjectCheckTab>('ascii')
 
   // ---- 版本方案（多版本导出）----
   // 方案管理/选择/统计在右侧功能栏「版本方案」侧边栏；此处只读当前方案用于打包过滤
@@ -163,8 +165,8 @@ export default function PackagePage() {
     }
     return Object.keys(scripts).length > 0 ? scripts : null
   }
-  // 预检拦截时是否来自「开始打包」点击（应用重命名后继续打包）
-  const nonAsciiPendingPackage = useRef(false)
+  // 预检拦截时是否来自「开始打包」点击（处理完成后继续打包）
+  const checkPendingPackage = useRef(false)
 
   function updateMobileCfg(patch: Partial<MobilePkgConfig>): void {
     setMobileCfg((prev) => {
@@ -310,19 +312,24 @@ export default function PackagePage() {
 
   async function handleMobilePackage(): Promise<void> {
     if (!projectPath) return
-    // 预检：非 ASCII 文件名会打进安卓 APK 后乱码、无法加载（字体/影片/图片）。
-    // 发现则拦截并弹窗让用户确认重命名，应用后再继续打包。
+    // 预检：非 ASCII 文件名会打进安卓 APK 后乱码、无法加载（字体/影片/图片）；
+    // 不支持的媒体格式在移动端同样无法播放。发现则拦截并弹窗让用户处理，处理后再继续打包。
     try {
-      const items = await window.pupurin.scanNonAsciiFiles(projectPath)
-      if (items.length > 0) {
-        nonAsciiPendingPackage.current = true
-        setNonAsciiItems(items)
-        setNonAsciiOpen(true)
+      const [ascii, media] = await Promise.all([
+        window.pupurin.scanNonAsciiFiles(projectPath),
+        window.pupurin.scanMediaFormats(projectPath),
+      ])
+      if (ascii.length > 0 || media.length > 0) {
+        checkPendingPackage.current = true
+        setAsciiItems(ascii)
+        setMediaItems(media)
+        setCheckTab(ascii.length > 0 ? 'ascii' : 'media')
+        setCheckOpen(true)
         return
       }
     } catch (e) {
       // 扫描失败不阻塞打包，实际打包流程会给出明确错误
-      console.error('[package] scan non-ascii failed:', e)
+      console.error('[package] scan project problems failed:', e)
     }
     await runMobilePackage()
   }
@@ -1392,25 +1399,27 @@ export default function PackagePage() {
         </div>
       </div>
 
-      {/* 非 ASCII 文件名检查/修复弹窗（移动端打包预检拦截） */}
-      {nonAsciiOpen && nonAsciiItems && (
-        <NonAsciiRenameDialog
+      {/* 项目检查/修复弹窗（移动端打包预检拦截：非 ASCII 文件名 / 不支持的媒体格式） */}
+      {checkOpen && (
+        <ProjectCheckDialog
           projectPath={projectPath}
-          items={nonAsciiItems}
+          asciiItems={asciiItems}
+          mediaItems={mediaItems}
+          initialTab={checkTab}
           onClose={() => {
-            nonAsciiPendingPackage.current = false
-            setNonAsciiOpen(false)
+            checkPendingPackage.current = false
+            setCheckOpen(false)
           }}
           onApplied={() => {
-            // 用户确认重命名后，若本次点击来自「开始打包」则继续打包
-            if (nonAsciiPendingPackage.current) {
-              nonAsciiPendingPackage.current = false
+            // 用户确认处理（重命名/转换）后，若本次点击来自「开始打包」则继续打包
+            if (checkPendingPackage.current) {
+              checkPendingPackage.current = false
               void runMobilePackage()
             }
           }}
           onSkipConfirm={() => {
-            // 用户取消改名但确认仍要继续 → 继续打包（明知可能加载失败）
-            nonAsciiPendingPackage.current = false
+            // 用户未处理但确认仍要继续 → 继续打包（明知可能加载失败）
+            checkPendingPackage.current = false
             void runMobilePackage()
           }}
         />

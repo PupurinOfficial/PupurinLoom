@@ -208,6 +208,102 @@ export interface NonAsciiRenameResult {
   patchedFiles: number // 被更新引用的 .rpy 文件数
 }
 
+// ---- 不支持的媒体格式检查与修复 ----
+
+export type MediaKind = 'image' | 'audio' | 'video'
+
+// 扫描结果：一个 Ren'Py 无法播放、需要转码的媒体文件
+export interface MediaFormatItem {
+  dir: string // 相对 game/ 的目录（'' = game 根目录）
+  name: string
+  kind: MediaKind
+  reason: string // 判定为不支持的原因
+  suggested: string // 系统建议的目标文件名（用户可修改）
+  targetExt: string // 建议的目标扩展名
+}
+
+// 提交转换的项目（newName 为用户确认后的名称，扩展名决定目标格式）
+export interface MediaConvertApplyItem {
+  dir: string
+  name: string
+  newName: string
+  kind: MediaKind
+}
+
+// 转换结果
+export interface MediaConvertResult {
+  logs: string[]
+  count: number // 实际转换成功数量
+  failed: Array<{ file: string; error: string }>
+  patchedFiles: number // 被更新引用的 .rpy 文件数
+}
+
+// 转换进度事件（phase='ffmpeg' 为下载/准备，'convert' 为逐文件进度）
+export interface MediaConvertProgress {
+  phase: 'ffmpeg' | 'convert'
+  message?: string
+  done?: number
+  total?: number
+  current?: string
+}
+
+// 项目检查弹窗的选项卡
+export type ProjectCheckTab = 'ascii' | 'media'
+
+// ---- 项目导出 / 导入（.loom 归档，本质是 zip）----
+
+// 导出勾选项
+export interface ProjectExportOptions {
+  images: boolean
+  audio: boolean
+  video: boolean
+  rpyc: boolean
+  loomData: boolean
+}
+
+// 各分类体积（字节）
+export interface ExportSizeInfo {
+  core: number
+  images: number
+  audio: number
+  video: number
+  rpyc: number
+  loomData: number
+}
+
+export interface ArchiveProgress {
+  phase: 'pack' | 'unpack'
+  done?: number
+  total?: number
+  current?: string
+}
+
+// 归档 manifest（loom-project.json）
+export interface ProjectArchiveManifest {
+  format: 'pupurin-loom-project'
+  formatVersion: number
+  appVersion: string
+  projectName: string
+  buildVersion: string
+  createdAt: number
+  includes: ProjectExportOptions
+  /** Loom 侧 localStorage 快照：key 模板（项目路径占位为 {PROJECT}）→ 原始值 */
+  loomData?: Record<string, string>
+}
+
+export interface ProjectExportResult {
+  cancelled: boolean
+  archivePath?: string
+  bytes?: number
+  files?: number
+}
+
+export interface ImportArchiveResult {
+  cancelled: boolean
+  project?: ProjectMeta
+  manifest?: ProjectArchiveManifest
+}
+
 declare global {
   interface Window {
     pupurin: {
@@ -217,7 +313,15 @@ declare global {
       createProject: (name: string, path?: string, opts?: { title?: string; buildName?: string; resolution?: string; scriptTemplate?: 'minimal' | 'basic' | 'branch' }) => Promise<ProjectMeta>
       openProject: (id: string) => Promise<ProjectMeta | null>
       deleteProject: (id: string) => Promise<void>
+      // 项目显示信息（config.name / build.version），更新会写回 game/options.rpy
+      readProjectInfo: (projectPath: string) => Promise<{ title: string; version: string }>
+      updateProjectInfo: (projectPath: string, patch: { title?: string; version?: string }) => Promise<{ title: string; version: string }>
       importProject: (sourcePath: string) => Promise<ProjectMeta>
+      // 项目导出 / 导入（.loom 归档，本质是 zip）
+      getExportSize: (projectPath: string) => Promise<ExportSizeInfo>
+      exportProject: (projectPath: string, opts: ProjectExportOptions, loomData?: Record<string, string>) => Promise<ProjectExportResult>
+      importProjectArchive: () => Promise<ImportArchiveResult>
+      onArchiveProgress: (cb: (ev: ArchiveProgress) => void) => () => void
       parseCharactersFromScript: (projectRoot: string) => Promise<CharacterMeta[]>
       getDefaultDir: () => Promise<string>
       getVisibleDir: () => Promise<string>
@@ -294,6 +398,10 @@ declare global {
       // 非 ASCII 文件名检查与修复（Ren'Py 要求游戏内文件名必须为 ASCII）
       scanNonAsciiFiles: (projectPath: string) => Promise<NonAsciiRenameItem[]>
       applyNonAsciiRename: (projectPath: string, items: NonAsciiRenameApplyItem[]) => Promise<NonAsciiRenameResult>
+      // 不支持的媒体格式检查与修复（ffmpeg 转码）
+      scanMediaFormats: (projectPath: string) => Promise<MediaFormatItem[]>
+      applyMediaConvert: (projectPath: string, items: MediaConvertApplyItem[]) => Promise<MediaConvertResult>
+      onMediaConvertProgress: (cb: (ev: MediaConvertProgress) => void) => () => void
       // 插件系统
       listPlugins: () => Promise<PluginMeta[]>
       loadPluginMain: (id: string) => Promise<string | null>

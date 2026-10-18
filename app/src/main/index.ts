@@ -18,6 +18,8 @@ import {
   getVisibleProjectsDir,
   ensureVisibleLink,
   importProject,
+  readProjectInfo,
+  updateProjectInfo,
   type CreateProjectOptions,
 } from './projectStore'
 import {
@@ -36,6 +38,14 @@ import {
   saveVariablesToScript,
   type Variable,
 } from './variableStore'
+import { scanMediaFormats, convertMediaFiles, type MediaApplyItem } from './mediaFormats'
+import {
+  estimateExportSizes,
+  exportProject,
+  importFromArchive,
+  LOOM_ARCHIVE_EXT,
+  type ProjectExportOptions,
+} from './projectArchive'
 import {
   listPlugins,
   loadPluginMain,
@@ -519,10 +529,80 @@ ipcMain.handle('projects:create', (_e, name: string, path?: string, opts?: Creat
 )
 ipcMain.handle('projects:open', (_e, id: string) => openProject(id))
 ipcMain.handle('projects:delete', (_e, id: string) => deleteProject(id))
+// 项目显示信息（config.name / build.version）：读取与更新（写回 game/options.rpy）
+ipcMain.handle('projects:readInfo', (_e, projectPath: string) => readProjectInfo(projectPath))
+ipcMain.handle('projects:updateInfo', (_e, projectPath: string, patch: { title?: string; version?: string }) =>
+  updateProjectInfo(projectPath, patch)
+)
 ipcMain.handle('projects:defaultDir', () => getDefaultProjectsDir())
 ipcMain.handle('projects:visibleDir', () => getVisibleProjectsDir())
 // 导入已有 Ren'Py 项目（选择目录 → 验证 → 注册）
 ipcMain.handle('projects:import', async (_e, sourcePath: string) => importProject(sourcePath))
+// ---- 项目导出 / 导入（.loom 归档，本质是 zip）----
+// 导出前体积预估（按分类，供导出弹窗展示）
+ipcMain.handle('projects:exportSize', (_e, projectPath: string) => estimateExportSizes(projectPath))
+// 导出项目为 .loom 归档：弹保存对话框 → 打包 → 返回产物路径
+ipcMain.handle(
+  'projects:export',
+  async (_e, projectPath: string, opts: ProjectExportOptions, loomData?: Record<string, string>) => {
+    const info = await readProjectInfo(projectPath)
+    const d = new Date()
+    const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
+    const suggested = `${basename(projectPath)}-${info.version}-${stamp}${LOOM_ARCHIVE_EXT}`
+    const r = mainWindow
+      ? await dialog.showSaveDialog(mainWindow, {
+          title: '导出 Loom 项目',
+          defaultPath: join(app.getPath('downloads'), suggested),
+          filters: [{ name: 'Loom 项目归档', extensions: ['loom'] }],
+        })
+      : await dialog.showSaveDialog({
+          title: '导出 Loom 项目',
+          defaultPath: join(app.getPath('downloads'), suggested),
+          filters: [{ name: 'Loom 项目归档', extensions: ['loom'] }],
+        })
+    if (r.canceled || !r.filePath) return { cancelled: true as const }
+    let target = r.filePath
+    if (!target.toLowerCase().endsWith(LOOM_ARCHIVE_EXT)) target += LOOM_ARCHIVE_EXT
+
+    const send = (p: unknown): void => {
+      mainWindow?.webContents.send('project:archiveProgress', p)
+    }
+    const result = await exportProject(
+      projectPath,
+      opts,
+      target,
+      { appVersion: app.getVersion(), projectName: info.title, buildVersion: info.version, loomData },
+      send
+    )
+    return { cancelled: false as const, ...result }
+  }
+)
+// 从 .loom 归档导入项目：弹文件选择对话框 → 解压校验 → 复制注册 → 返回项目与 manifest
+ipcMain.handle('projects:importArchive', async () => {
+  const r = mainWindow
+    ? await dialog.showOpenDialog(mainWindow, {
+        title: '导入 Loom 项目',
+        properties: ['openFile'],
+        filters: [
+          { name: 'Loom 项目归档', extensions: ['loom', 'zip'] },
+          { name: '所有文件', extensions: ['*'] },
+        ],
+      })
+    : await dialog.showOpenDialog({
+        title: '导入 Loom 项目',
+        properties: ['openFile'],
+        filters: [
+          { name: 'Loom 项目归档', extensions: ['loom', 'zip'] },
+          { name: '所有文件', extensions: ['*'] },
+        ],
+      })
+  if (r.canceled || !r.filePaths[0]) return { cancelled: true as const }
+  const send = (p: unknown): void => {
+    mainWindow?.webContents.send('project:archiveProgress', p)
+  }
+  const result = await importFromArchive(r.filePaths[0], send)
+  return { cancelled: false as const, ...result }
+})
 // 在 Finder 中显示项目文件夹（优先显示可见目录）
 ipcMain.handle('projects:showInFinder', async (_e, projectPath: string) => {
   // 尝试构建可见路径
@@ -892,16 +972,11 @@ function startStaticServer(rootDir: string): Promise<{ url: string; close: () =>
 
 // 在 options.rpy 中写入/更新 build.version
 async function ensureBuildVersion(projectPath: string, version: string): Promise<void> {
-  const optionsPath = join(projectPath, 'game', 'options.rpy')
   try {
-    let content = await fs.readFile(optionsPath, 'utf-8')
-    if (/define build\.version\s*=/.test(content)) {
-      content = content.replace(/define build\.version\s*=\s*".*?"/, `define build.version = "${version}"`)
-    } else {
-      content = content.replace(/define build\.name\s*=\s*".*?"/, (m) => `${m}\ndefine build.version = "${version}"`)
-    }
-    await fs.writeFile(optionsPath, content, 'utf-8')
-  } catch { /* 写入失败不影响打包 */ }
+    await updateProjectInfo(projectPath, { version })
+  } catch {
+    /* 写入失败不影响打包 */
+  }
 }
 
 // 定位 Web 产物根目录（web_build 可能生成在 name-version-web 子目录）
@@ -1265,6 +1340,23 @@ async function ensureFfmpeg(log: (s: string) => void = () => {}): Promise<{ path
   } finally {
     await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => undefined)
   }
+}
+
+// 非下载式探测：只复用已解析 / 已缓存 / 系统已装的 ffmpeg。
+// 供「媒体格式检查」的扫描阶段使用——首次扫描不应偷偷触发 20-30MB 的下载。
+function peekFfmpeg(): string | null {
+  if (ffmpegResolved) return ffmpegResolved.path
+  const cached = ffmpegCachePath()
+  if (ffmpegWorks(cached)) {
+    ffmpegResolved = { path: cached, source: 'downloaded' }
+    return cached
+  }
+  const sys = findSystemFfmpeg()
+  if (sys) {
+    ffmpegResolved = { path: sys, source: 'system' }
+    return sys
+  }
+  return null
 }
 
 // 预下载 Gradle 发行包到 wrapper 缓存。
@@ -1698,8 +1790,17 @@ function writeSettings(s: Record<string, unknown>): Promise<void> {
 ipcMain.handle('settings:get', async () => readSettings())
 ipcMain.handle('settings:set', async (_e, key: string, value: unknown) => {
   // 只允许写入白名单键，避免渲染层污染任意配置
-  const allowed = new Set(['sdkPath', 'themeMode', 'themePreset', 'themeCustomAccent', 'editorFontSize'])
+  const allowed = new Set(['sdkPath', 'themeMode', 'themePreset', 'themeCustomAccent', 'editorFontSize', 'aiProviders'])
   if (!allowed.has(key)) throw new Error(`不允许的设置项: ${key}`)
+  // AI 接口配置：仅做基础结构校验，非法形状直接拒写（具体归一化在渲染层完成）
+  if (key === 'aiProviders') {
+    const okShape =
+      !!value &&
+      typeof value === 'object' &&
+      Array.isArray((value as { providers?: unknown }).providers) &&
+      typeof (value as { bindings?: unknown }).bindings === 'object'
+    if (!okShape) throw new Error('AI 接口配置格式无效')
+  }
   const s = await readSettings()
   // sdkPath 需要校验：指向的目录必须包含可用的 Ren'Py SDK 可执行文件
   if (key === 'sdkPath' && typeof value === 'string' && value.trim()) {
@@ -2299,6 +2400,36 @@ ipcMain.handle('project:applyNonAsciiRename', async (_e, projectPath: string, it
   await patchRpy('')
 
   return { logs, count: mappings.length, patchedFiles }
+})
+
+// ---- 不支持的媒体格式检查与修复 ----
+// Ren'Py 对图片/音频/视频的格式与编码有明确限制（见 mediaFormats.ts 顶部注释），
+// 这里把不支持的媒体文件用 ffmpeg 转成受支持格式，并同步 .rpy 中的引用。
+
+// 扫描：只做扩展名判定（必要时探测编码），不触发 ffmpeg 下载
+ipcMain.handle('project:scanMediaFormats', (_e, projectPath: string) => scanMediaFormats(projectPath, peekFfmpeg()))
+
+// 转换：需要 ffmpeg（此处才允许按需下载），逐文件回报进度
+ipcMain.handle('project:applyMediaConvert', async (_e, projectPath: string, items: MediaApplyItem[]) => {
+  const ff = await ensureFfmpeg((s) => {
+    try {
+      mainWindow?.webContents.send('project:mediaConvertProgress', { phase: 'ffmpeg', message: s })
+    } catch {
+      /* 窗口已关闭 */
+    }
+  })
+  if (!ff?.path) throw new Error('无法获取 ffmpeg（自动下载失败，请手动安装后重试）')
+
+  return convertMediaFiles(projectPath, items, ff.path, () => {}, {
+    migrateMarks: (oldRel, newRel) => migrateStoryMarks(projectPath, oldRel, newRel),
+    onProgress: (done, total, current) => {
+      try {
+        mainWindow?.webContents.send('project:mediaConvertProgress', { phase: 'convert', done, total, current })
+      } catch {
+        /* 窗口已关闭 */
+      }
+    },
+  })
 })
 
 // 选择外部文件导入

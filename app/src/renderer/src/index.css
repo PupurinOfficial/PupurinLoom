@@ -96,6 +96,28 @@ body {
   border-radius: 2px;
 }
 
+/* 「来点灵感」滚动词条：内容复制两份，从 -50% 位移到 0 = 持续向右滚动 */
+@keyframes loom-insp-right {
+  from {
+    transform: translateX(-50%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+.loom-insp-track {
+  display: flex;
+  width: max-content;
+  animation-name: loom-insp-right;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+.loom-insp-viewport {
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 6%, #000 94%, transparent);
+  mask-image: linear-gradient(to right, transparent, #000 6%, #000 94%, transparent);
+}
+
 /* 原生颜色选择器取色按钮的基础样式 */
 input[type='color'] {
   -webkit-appearance: none;

@@ -3,7 +3,7 @@
 // 保存为按项目隔离的标记列表，供后续生成宣传片使用。
 //
 // 演示/依赖的 loom API：
-//   loom.project.getPath / listFiles / openAt / parseProject
+//   loom.project.getPath / listFiles / openAt / parseProject / profile
 //   loom.fs.read / write
 //   loom.http.post(url, body, headers, { timeoutMs, maxBytes })
 //   loom.store.get / set、loom.toast、loom.panel、loom.commands、loom.hooks
@@ -13,6 +13,8 @@
   var EXPORT_FILE = 'pupurin_moments.json'
   var MARKS_KEY_PREFIX = 'marks:'
   var CONFIG_KEY = 'config'
+  // 「AI 管理」中的功能 id：用于按功能绑定 / 解析 AI 接口
+  var FEATURE_ID = 'pupurin-moments'
   var MAX_LOGS = 60
 
   // ---------- 默认提示词 ----------
@@ -467,37 +469,87 @@
     return 'HTTP ' + (r ? r.status : '?') + '：' + body
   }
 
+  // 解析本次调用应使用的 AI 接口：
+  // 优先「AI 管理」中为铃光时刻指定的接口（loom.ai.resolve）；未配置时回退插件内自带配置（向后兼容）。
+  function resolveProvider() {
+    if (!loom.ai || typeof loom.ai.resolve !== 'function') return Promise.resolve(null)
+    return loom.ai.resolve(FEATURE_ID).then(
+      function (p) {
+        return p || null
+      },
+      function () {
+        return null
+      }
+    )
+  }
+
+  // 项目简介（标签 + 简介）提示词块：每次调用 AI 都拼进 messages，让输出贴合作品基调。
+  // 未填写简介时返回空串，等价于不注入。
+  function profileBlock() {
+    try {
+      if (loom.project && typeof loom.project.profile === 'function') {
+        var pr = loom.project.profile()
+        return (pr && pr.block) || ''
+      }
+    } catch (e) { /* 忽略：不影响主流程 */ }
+    return ''
+  }
+
+  function withProfile(messages) {
+    var block = profileBlock()
+    if (!block) return messages
+    return [{ role: 'system', content: block }].concat(messages)
+  }
+
   function callAI(messages, maxTokens) {
     var c = cfg()
-    if (!c.apiKey) throw new Error('请先在「设置」中填写 API Key')
-    var url = chatUrl(c.baseUrl)
-    if (!url) throw new Error('请先在「设置」中填写 API 地址')
-    var body = {
-      model: c.model,
-      messages: messages,
-      temperature: c.temperature
-    }
-    if (maxTokens) body.max_tokens = maxTokens
-    if (c.forceJson) body.response_format = { type: 'json_object' }
-    var headers = {
-      'Content-Type': 'application/json',
-      Authorization: 'Bearer ' + c.apiKey
-    }
-    return loom.http
-      .post(url, body, headers, { timeoutMs: c.timeoutMs, maxBytes: c.maxOutputChars })
-      .then(function (r) {
-        if (!r || !r.ok) throw new Error(httpError(r))
-        var json
-        try {
-          json = JSON.parse(r.text)
-        } catch (e) {
-          throw new Error('响应不是合法 JSON：' + String(r.text || '').slice(0, 200))
-        }
-        if (json && json.error) {
-          throw new Error('接口返回错误：' + String(json.error.message || json.error.code || json.error))
-        }
-        return extractAssistantText(json)
-      })
+    return resolveProvider().then(function (p) {
+      var baseUrl = p ? p.baseUrl : c.baseUrl
+      var apiKey = p ? p.apiKey : c.apiKey
+      var model = p ? p.model : c.model
+      var fromManager = !!p
+      if (!apiKey) {
+        throw new Error(
+          fromManager
+            ? '所选 AI 接口未填写 API Key，请在「AI 管理」中补全'
+            : '未配置 AI 接口：请在「AI 管理」中添加接口，或在本页「高级」中填写 API Key'
+        )
+      }
+      var url = chatUrl(baseUrl)
+      if (!url) {
+        throw new Error(
+          fromManager
+            ? '所选 AI 接口的地址为空，请在「AI 管理」中补全'
+            : '未配置 AI 接口：请在「AI 管理」中添加接口，或在本页「高级」中填写接口地址'
+        )
+      }
+      var body = {
+        model: model,
+        messages: withProfile(messages),
+        temperature: c.temperature
+      }
+      if (maxTokens) body.max_tokens = maxTokens
+      if (c.forceJson) body.response_format = { type: 'json_object' }
+      var headers = {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + apiKey
+      }
+      return loom.http
+        .post(url, body, headers, { timeoutMs: c.timeoutMs, maxBytes: c.maxOutputChars })
+        .then(function (r) {
+          if (!r || !r.ok) throw new Error(httpError(r))
+          var json
+          try {
+            json = JSON.parse(r.text)
+          } catch (e) {
+            throw new Error('响应不是合法 JSON：' + String(r.text || '').slice(0, 200))
+          }
+          if (json && json.error) {
+            throw new Error('接口返回错误：' + String(json.error.message || json.error.code || json.error))
+          }
+          return extractAssistantText(json)
+        })
+    })
   }
 
   function testConnection() {
@@ -1110,8 +1162,10 @@
         })
       }
       if (promoUi.autoPreview && (includedMarks().length || String(pcfg().title || '').trim())) schedulePreview()
-    } else if (state.tab === 'cfg') body.innerHTML = cfgTabHtml()
-    else body.innerHTML = runTabHtml()
+    } else if (state.tab === 'cfg') {
+      body.innerHTML = cfgTabHtml()
+      mountCfgAiSelector(body)
+    } else body.innerHTML = runTabHtml()
     updateProgressDom()
     pUpdateDom()
   }
@@ -1335,10 +1389,12 @@
   function cfgTabHtml() {
     var c = cfg()
     var html = ''
-    html += '<div class="sz-sub" style="margin-top:0;padding-top:0;border-top:0">AI 接口（OpenAI 兼容协议）</div>'
-    html += field('接口地址', '<input class="sz-input" data-cfg="baseUrl" value="' + esc(c.baseUrl) + '" placeholder="https://api.deepseek.com/v1"/>')
-    html += field('API Key', '<input class="sz-input" data-cfg="apiKey" value="' + esc(c.apiKey) + '" placeholder="sk-..."/>')
-    html += field('模型名', '<input class="sz-input" data-cfg="model" value="' + esc(c.model) + '" placeholder="deepseek-chat"/>')
+    html += '<div class="sz-sub" style="margin-top:0;padding-top:0;border-top:0">AI 服务</div>'
+    html +=
+      '<div class="sz-field"><label>使用的 AI 接口</label>' +
+      '<div data-role="ai-selector" style="display:flex;gap:6px;align-items:center"></div></div>'
+    html +=
+      '<div class="sz-note">在「AI 管理」中可配置多个 AI 接口（OpenAI 兼容协议）；此处可单独为「铃光时刻」指定一个接口，或选择「跟随默认」使用全局默认接口。</div>'
     html +=
       field(
         '温度',
@@ -1375,11 +1431,20 @@
     html +=
       '<div class="sz-row">' +
       '<button type="button" class="sz-btn sz-primary" data-act="test">测试连接</button>' +
+      '<button type="button" class="sz-btn" data-act="ai-manage">管理 AI 服务</button>' +
       '<button type="button" class="sz-btn" data-act="cfg-reset">恢复默认配置</button>' +
       '<span class="sz-muted" data-role="testmsg"></span>' +
       '</div>'
+
     html +=
-      '<div class="sz-note">BaseURL 填到版本号即可（如 https://api.deepseek.com/v1）；本插件会拼接 /chat/completions。也可直接填完整接口地址。密钥保存在本机插件数据目录，不上传任何服务器。</div>'
+      '<details style="margin-top:12px">' +
+      '<summary style="cursor:pointer;font-size:11px;color:rgb(var(--loom-muted))">高级：自定义接口（兼容旧配置，通常无需填写）</summary>'
+    html += field('接口地址', '<input class="sz-input" data-cfg="baseUrl" value="' + esc(c.baseUrl) + '" placeholder="https://api.deepseek.com/v1"/>')
+    html += field('API Key', '<input class="sz-input" data-cfg="apiKey" value="' + esc(c.apiKey) + '" placeholder="sk-..."/>')
+    html += field('模型名', '<input class="sz-input" data-cfg="model" value="' + esc(c.model) + '" placeholder="deepseek-chat"/>')
+    html +=
+      '<div class="sz-note">未在「AI 服务」中选定接口时，才会使用这里的配置。BaseURL 填到版本号即可（如 https://api.deepseek.com/v1），本插件会拼接 /chat/completions；也可直接填完整接口地址。密钥保存在本机，不上传任何服务器。</div>'
+    html += '</details>'
 
     html += '<div class="sz-sub">判定提示词（你认为什么算「铃光时刻」）</div>'
     html += '<textarea class="sz-area" data-cfg="judgePrompt">' + esc(c.judgePrompt) + '</textarea>'
@@ -1389,6 +1454,27 @@
       '<div class="sz-row"><button type="button" class="sz-btn" data-act="prompt-reset">恢复默认提示词</button>' +
       '<span class="sz-muted">修改会即时保存</span></div>'
     return html
+  }
+
+  // 异步填充 AI 选择器（需先确保「AI 管理」配置已加载）
+  function mountCfgAiSelector(body) {
+    var host = body.querySelector('[data-role="ai-selector"]')
+    if (!host || !loom.ai || typeof loom.ai.providerSelectorHtml !== 'function') return
+    function paint() {
+      host.innerHTML =
+        loom.ai.providerSelectorHtml(FEATURE_ID, { className: 'sz-input' }) +
+        '<button type="button" class="sz-btn" data-act="ai-manage">管理 AI 服务</button>'
+      if (typeof loom.ai.bindProviderSelector === 'function') {
+        loom.ai.bindProviderSelector(host, FEATURE_ID, function () {
+          loom.toast('已切换 AI 接口', 'success')
+        })
+      }
+    }
+    if (typeof loom.ai.list === 'function') {
+      loom.ai.list().then(paint, paint)
+    } else {
+      paint()
+    }
   }
 
   function field(label, inputHtml) {
@@ -1531,6 +1617,12 @@
           loom.toast('连接失败：' + String(err && err.message ? err.message : err), 'error')
         }
       )
+    } else if (act === 'ai-manage') {
+      if (loom.ai && typeof loom.ai.openManager === 'function') {
+        loom.ai.openManager(FEATURE_ID)
+      } else {
+        loom.toast('当前版本不支持「AI 管理」', 'error')
+      }
     } else if (act === 'cfg-reset') {
       var key = cfg().apiKey
       var next = {}
